@@ -250,7 +250,7 @@ class ProfileFlowTest {
         assertEquals(listOf("퇴근", "노을", "휴식"), normalizeDiaryTags("#퇴근, 노을 #퇴근 휴식"))
     }
 
-    @Test fun sampleDayShowsThreeTimesTwoVoiceExamplesAndEditableTags() {
+    @Test fun sampleDayShowsThreeTimesTwoVoiceExamplesAndEmotionTags() {
         ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
         val db = JournalStore(context)
         assertTrue(db.seedYesterday())
@@ -269,7 +269,9 @@ class ProfileFlowTest {
                 click(a, "시간별 기록")
                 click(a, "08:30 · 걱정")
                 assertTrue(shows("오전 회의"))
-                assertTrue(shows("#출근"))
+                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.contentDescription == "감정 태그: 걱정" })
+                assertFalse(shows("#출근"))
                 click(a, "12:40 · 평온")
                 assertTrue(shows("주말 계획"))
                 click(a, "음성 기록")
@@ -278,28 +280,9 @@ class ProfileFlowTest {
                 click(a, "18:40 · 평온")
                 assertTrue(shows("실제 녹음 없음"))
                 assertTrue(shows("퇴근길에 노을"))
-                click(a, "수정")
+                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.contentDescription == "감정 태그: 평온" })
             }
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-            fun findTag(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
-                if (node.contentDescription?.toString() == "일기 태그") return node
-                for (index in 0 until node.childCount) {
-                    node.getChild(index)?.let { child -> findTag(child)?.let { return it } }
-                }
-                return null
-            }
-            val tags = checkNotNull(findTag(automation.rootInActiveWindow))
-            val args = android.os.Bundle().apply {
-                putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    "#퇴근, #나만의시간")
-            }
-            assertTrue(tags.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args))
-            automation.rootInActiveWindow.findAccessibilityNodeInfosByText("저장")
-                .first { it.isClickable }.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            assertEquals(listOf("퇴근", "나만의시간"), JournalStore(context).entries()
-                .single { it.id == "demo-yesterday" }.tags)
         }
     }
     @Test fun captureDemoDetailTabs() {
