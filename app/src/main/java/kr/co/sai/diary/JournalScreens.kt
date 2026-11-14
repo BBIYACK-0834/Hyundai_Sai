@@ -559,7 +559,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun saveVoiceDiary(draft: VoiceDraft) {
-        val entry = db.add(draft.text, draft.moment, voice = true, recordedAt = draft.recordedAt, id = draft.id)
+        val entry = db.add(draft.text, draft.moment, voice = true, recordedAt = draft.recordedAt, id = draft.id, tags = emptyList())
         voiceDraft = if (entry == null) draft else null
         latestSavedId = entry?.id ?: latestSavedId
         message = if (entry == null) "홈에서 다시 저장해 주세요." else "오늘의 감정은 ${entry.emotion.title}이에요."
@@ -567,8 +567,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
-    private fun saveTypedDiary(body: String, tags: List<String> = suggestDiaryTags(body)) {
-        val entry = db.add(body, if (night) "도착" else "출발", voice = false, tags = tags)
+    private fun saveTypedDiary(body: String) {
+        val entry = db.add(body, if (night) "도착" else "출발", voice = false, tags = emptyList())
         if (entry == null) {
             editDiary(null, "저장하지 못했어요. 다시 시도해 주세요.", body)
             return
@@ -589,18 +589,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
             filters = arrayOf(InputFilter.LengthFilter(12000))
         }
-        val tagInput = EditText(host).apply {
-            contentDescription = "일기 태그"
-            hint = "태그 · 쉼표로 구분 (최대 6개)"
-            setSingleLine(true)
-            setText(entry?.tags?.joinToString(", ").orEmpty())
-            filters = arrayOf(InputFilter.LengthFilter(200))
-        }
         val fields = android.widget.LinearLayout(host).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(24, 0, 24, 0)
             addView(input)
-            addView(tagInput)
         }
         val dialog = AlertDialog.Builder(host).setTitle(if (entry == null) "일기 남기기" else "일기 수정")
             .setMessage(reason).setView(ScrollView(host).apply { addView(fields) }).setNegativeButton("취소", null)
@@ -611,10 +603,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 if (text.isBlank()) { input.error = "내용을 입력해 주세요."; return@setOnClickListener }
                 if (entry == null) {
                     dialog.dismiss()
-                    saveTypedDiary(text, tagInput.text.toString().takeIf { it.isNotBlank() }
-                        ?.let(::normalizeDiaryTags) ?: suggestDiaryTags(text))
-                } else if (db.replace(entry.copy(body = text, emotion = Mood.classify(text),
-                        tags = normalizeDiaryTags(tagInput.text.toString())))) {
+                    saveTypedDiary(text)
+                } else if (db.replace(entry.copy(body = text, emotion = Mood.classify(text)))) {
                     dialog.dismiss()
                     host.render()
                 } else msg("수정 내용을 저장하지 못했어요.")
@@ -876,12 +866,12 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             setLineSpacing(5f, 1f)
         }
         val tagTop = if (hasTimePicker) 241 else 153
-        val tags = if (detailTab == 0) dayEntries.flatMap { it.tags }.distinct().take(6)
-            else selected?.tags.orEmpty()
+        val tags = if (detailTab == 0) dayEntries.map { it.emotion.title }.distinct()
+            else selected?.let { listOf(it.emotion.title) }.orEmpty()
         if (tags.isNotEmpty()) {
             val tagText = android.widget.TextView(host).apply {
-                text = tags.joinToString("   ") { "#$it" }
-                contentDescription = "일기 태그: ${tags.joinToString(", ")}"
+                text = "감정  " + tags.joinToString(" · ")
+                contentDescription = "감정 태그: ${tags.joinToString(", ")}"
                 setTextColor(Color.parseColor("#536548"))
                 textSize = 14f
                 setSingleLine(true)
