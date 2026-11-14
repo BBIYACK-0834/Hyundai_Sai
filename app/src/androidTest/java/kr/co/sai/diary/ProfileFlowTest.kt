@@ -31,9 +31,15 @@ class ProfileFlowTest {
         val bitmap = instrumentation.uiAutomation.takeScreenshot()
         assertNotNull(bitmap)
         val directory = java.io.File(context.externalCacheDir, "screenshots").apply { mkdirs() }
-        java.io.File(directory, "$name.png").outputStream().use {
+        val file = java.io.File(directory, "$name.png")
+        file.outputStream().use {
             bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
         }
+        // Gradle uninstalls the test target; retain screenshots outside its app directory.
+        val command = "mkdir -p /sdcard/Download/sai-screenshots && cp ${file.absolutePath} /sdcard/Download/sai-screenshots/$name.png"
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand(command)
+        ).use { it.readBytes() }
     }
     @Test fun captureFirstRow() {
         ActivityScenario.launch(MainActivity::class.java).use { capture("01-profile") }

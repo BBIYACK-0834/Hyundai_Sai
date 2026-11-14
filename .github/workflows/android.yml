@@ -43,7 +43,7 @@ jobs:
             adb shell wm size 1024x552
             adb shell wm density 160
             ./gradlew connectedDebugAndroidTest
-            adb pull /sdcard/Android/data/kr.co.sai.diary/cache/screenshots app/build/reports/screenshots
+            adb pull /sdcard/Download/sai-screenshots app/build/reports/screenshots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
