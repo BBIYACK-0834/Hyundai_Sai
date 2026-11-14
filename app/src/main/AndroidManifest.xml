@@ -2,9 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
-    <queries>
-        <intent><action android:name="android.speech.RecognitionService" /></intent>
-    </queries>
     <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <application android:allowBackup="false" android:label="사이" android:theme="@style/AppTheme" android:supportsRtl="true">

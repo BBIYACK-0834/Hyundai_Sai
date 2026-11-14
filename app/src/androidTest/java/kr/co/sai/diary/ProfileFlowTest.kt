@@ -14,6 +14,7 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.LocalDateTime
 
 @RunWith(AndroidJUnit4::class)
 class ProfileFlowTest {
@@ -103,19 +104,32 @@ class ProfileFlowTest {
             }
         }
     }
-    @Test fun journalEntryAppearsInBooksAndCalendar() {
+    @Test fun voiceEntryKeepsRecordingDateAndAppearsInRecordsAfterRestart() {
         ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
-        val diary = checkNotNull(JournalStore(context).add("오늘은 편안했어요.", "출발", voice = false))
+        val recordedAt = LocalDateTime.now().withHour(23).withMinute(59).withSecond(0).withNano(0)
+        val diary = checkNotNull(JournalStore(context).add(
+            "오늘은 편안했어요.", "출발", voice = true, recordedAt = recordedAt
+        ))
+        assertEquals(recordedAt.toLocalDate(), diary.date)
+        assertEquals(recordedAt.toLocalTime(), diary.time)
+        assertNotNull(JournalStore(context).add(diary.body, diary.moment, true, recordedAt, diary.id))
+        assertEquals(listOf(diary), JournalStore(context).entries())
+        ActivityScenario.launch(MainActivity::class.java).use { }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { a ->
                 val records = descendants(a.window.decorView).filterIsInstance<Button>()
                     .single { it.contentDescription == "기록" }
                 records.performClick()
-                click(a, "날짜별")
-                val day = descendants(a.window.decorView).filterIsInstance<Button>()
-                    .single { it.contentDescription == "${diary.date.monthValue}월 ${diary.date.dayOfMonth}일 일기 보기" }
-                day.performClick()
-                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>().any { it.text.toString() == diary.body })
+                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == "1편" })
+                fun clickDescription(text: String) = descendants(a.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == text }.performClick()
+                clickDescription("${diary.date.monthValue}월 일기장")
+                repeat((diary.date.dayOfMonth - 1) / 6) { click(a, "다음 날짜 ›") }
+                clickDescription("${diary.date.monthValue}월 ${diary.date.dayOfMonth}일 일기 보기")
+                click(a, "음성 기록")
+                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == diary.body })
             }
         }
     }

@@ -17,14 +17,29 @@ import android.widget.ScrollView
 import android.widget.Toast
 import com.caverock.androidsvg.SVG
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 
 internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private val db = JournalStore(host)
-    private val speech = DiarySpeech(host)
+    private enum class SpeechPhase { STARTING, RECORDING, TRANSCRIBING }
+
+    private data class VoiceDraft(
+        val text: String,
+        val moment: String,
+        val recordedAt: LocalDateTime,
+        val id: String = UUID.randomUUID().toString()
+    )
+
+    private var speech: DiarySpeech? = null
+    private var speechPhase: SpeechPhase? = null
+    private var voiceDraft: VoiceDraft? = null
+    private var microphonePermissionPending = false
+    private var latestSavedId: String? = state?.getString("journal_latest_saved")
     private val pictures = mutableMapOf<String, Drawable.ConstantState>()
     private val files = host.assets.list("art").orEmpty().associateBy { it.substringBeforeLast('.') }
     private val brown = "#4b372f"
@@ -53,6 +68,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
 
     fun saveState(out: Bundle) {
         out.putString("journal_page", page)
+        out.putString("journal_latest_saved", latestSavedId)
         out.putString("journal_month", month.toString())
         out.putInt("journal_half", half)
         out.putInt("journal_dates", dayPage)
@@ -64,7 +80,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     fun go(next: String) {
-        if (next != page && speech.active) speech.close()
+        if (next != page) cancelRecording()
         if (next != page) stopMusic()
         page = next
         host.render()
@@ -86,7 +102,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     fun clear(): Boolean {
-        stopTransientWork()
+        cancelSpeech()
+        stopMusic()
+        voiceDraft = null
+        latestSavedId = null
         page = "home"
         message = ""
         month = YearMonth.now()
@@ -97,8 +116,18 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     fun stopTransientWork() {
-        speech.close()
+        cancelRecording()
         stopMusic()
+    }
+
+    private fun cancelRecording() {
+        if (speechPhase != SpeechPhase.TRANSCRIBING) cancelSpeech()
+    }
+
+    fun cancelSpeech() {
+        speech?.cancel()
+        speech = null
+        speechPhase = null
     }
 
     private fun stopMusic() {
@@ -179,7 +208,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         label(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")), 898, 17, 77, 37)
         panel(38, 62, 948, 1, "#e3d7cb")
         if (page == "home") {
-            hit("시연 날씨 선택", 768, 16, 96, 39) { speech.close(); host.changeWeather() }
+            hit("시연 날씨 선택", 768, 16, 96, 39) { cancelRecording(); host.changeWeather() }
             hit("주행 화면 시연", 630, 16, 46, 39) { drive = 0; go("drive") }
         }
     }
@@ -241,15 +270,29 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         art("tail", 499.2, 178.8, 25.6, 15.2)
         label(message.ifBlank { if (night) "오늘은 어떤 하루였나요?" else "어떤 마음으로\n출발할까요?" },
             365, 100, 294, 74, 21f, bold = true, center = true)
-        art(if (night && todayFlower != null) "evening" else "morning", 409.6, 181.6, 204.8, 204.8, "마음꽃")
-        panel(481, 374, 62, 59, "#eaccc4")
-        panel(487, 379, 50, 50, "#a46057")
-        if (!speech.active) art("mic", 506, 392, 12, 18)
-        else label("Ⅱ", 487, 379, 50, 49, 23f, paper, true, center = true)
-        val caption = when { speech.stopping -> "저장 중…"; speech.active -> "녹음 중 · 저장"; else -> "일기 녹음" }
-        panel(452, 431, 120, 24, "#fff5ea")
-        label(caption, 452, 431, 120, 24, 14f, center = true)
-        hit(caption, 451, 373, 122, 82) { if (speech.active) { speech.stop(); host.render() } else requestSpeech() }
+        art(if (night && todayFlower != null) "flower${todayFlower.art}" else "morning", 409.6, 181.6, 204.8, 204.8, "마음꽃")
+        panel(481, 340, 62, 59, "#eaccc4")
+        panel(487, 345, 50, 50, "#a46057")
+        if (speechPhase == SpeechPhase.RECORDING) {
+            label("Ⅱ", 487, 345, 50, 49, 23f, paper, true, center = true)
+        } else {
+            art("mic", 506, 358, 12, 18)
+        }
+        val caption = when (speechPhase) {
+            SpeechPhase.STARTING -> "마이크 준비 중…"
+            SpeechPhase.RECORDING -> "일시정지"
+            SpeechPhase.TRANSCRIBING -> "텍스트 저장 중…"
+            null -> if (voiceDraft != null) "다시 저장" else "일기 녹음"
+        }
+        panel(428, 399, 168, 27, "#fff5ea")
+        label(caption, 428, 399, 168, 27, 14f, center = true)
+        if (speechPhase == SpeechPhase.RECORDING || speechPhase == null) {
+            hit(caption, 428, 340, 168, 86) { handleVoiceControl() }
+        }
+        val latestSaved = db.entries().firstOrNull { it.id == latestSavedId }
+        if (speechPhase == null && voiceDraft == null && latestSaved != null) {
+            button("방금 저장한 일기 보기 ›", 372, 430, 280, 31, paper) { openDiary(latestSaved, "home") }
+        }
 
         if (night) {
             label("오늘의 꽃", 731, 109, 225, 33, 20f, bold = true)
@@ -295,41 +338,88 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
-    private fun requestSpeech() {
-        if (!speech.available()) {
-            editDiary(null, "이 기기에서 오프라인 음성 인식을 사용할 수 없어요.")
+    private fun handleVoiceControl() {
+        if (speechPhase == SpeechPhase.RECORDING) {
+            speechPhase = SpeechPhase.TRANSCRIBING
+            message = "음성을 글로 바꿔 저장하고 있어요."
+            speech?.finish()
+            host.render()
             return
         }
+        voiceDraft?.let { saveVoiceDiary(it); return }
+        if (microphonePermissionPending) return
         if (host.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            microphonePermissionPending = true
             host.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 42)
-        } else startSpeech()
+        } else {
+            startSpeech()
+        }
     }
 
     fun permissionResult(granted: Boolean) {
+        microphonePermissionPending = false
+        if (!host.isJournalVisible || page != "home") return
         if (granted) startSpeech() else editDiary(null, "마이크 권한 없이 글로 기록할 수 있어요.")
     }
 
     private fun startSpeech() {
-        if (speech.start({ saveDiary(it, true) }, { error ->
-                message = error
+        val recordedAt = LocalDateTime.now()
+        val moment = if (night) "도착" else "출발"
+        lateinit var session: DiarySpeech
+        session = DiarySpeech(host, object : DiarySpeech.Listener {
+            override fun onRecording() = host.runOnUiThread {
+                if (speech !== session || speechPhase != SpeechPhase.STARTING) return@runOnUiThread
+                speechPhase = SpeechPhase.RECORDING
+                message = "음성 녹음 중"
                 host.render()
-                editDiary(null, error)
-            })) {
-            message = ""
-            stopMusic()
-            host.render()
-        } else editDiary(null, "음성 인식을 시작하지 못했어요.")
+            }
+
+            override fun onTranscribing() = host.runOnUiThread {
+                if (speech !== session) return@runOnUiThread
+                speechPhase = SpeechPhase.TRANSCRIBING
+                message = "음성을 글로 바꿔 저장하고 있어요."
+                host.render()
+            }
+
+            override fun onResult(text: String?, error: String?) = host.runOnUiThread {
+                if (speech !== session) return@runOnUiThread
+                speech = null
+                speechPhase = null
+                if (text.isNullOrBlank()) {
+                    message = error ?: "다시 말해 주세요."
+                    if (!host.isJournalVisible || page != "home") msg(message)
+                    host.render()
+                } else {
+                    saveVoiceDiary(VoiceDraft(text, moment, recordedAt))
+                }
+            }
+        })
+        speech = session
+        speechPhase = SpeechPhase.STARTING
+        message = "마이크 준비 중…"
+        stopMusic()
+        session.start()
+        host.render()
     }
 
-    private fun saveDiary(body: String, voice: Boolean) {
-        val entry = db.add(body, if (night) "도착" else "출발", voice)
+    private fun saveVoiceDiary(draft: VoiceDraft) {
+        val entry = db.add(draft.text, draft.moment, voice = true, recordedAt = draft.recordedAt, id = draft.id)
+        voiceDraft = if (entry == null) draft else null
+        latestSavedId = entry?.id ?: latestSavedId
+        message = if (entry == null) "홈에서 다시 저장해 주세요." else "일기를 저장했어요."
+        if (!host.isJournalVisible || page != "home") msg(message)
+        host.render()
+    }
+
+    private fun saveTypedDiary(body: String) {
+        val entry = db.add(body, if (night) "도착" else "출발", voice = false)
         if (entry == null) {
             editDiary(null, "저장하지 못했어요. 다시 시도해 주세요.", body)
             return
         }
-        message = if (night) "오늘의 마음을 간직했어요." else "오늘의 첫 마음을 남겼어요."
+        latestSavedId = entry.id
+        message = "일기를 저장했어요."
         host.render()
-        if (night) chooseFlower(entry)
     }
 
     private fun editDiary(entry: Diary?, reason: String? = null, draft: String = entry?.body.orEmpty()) {
@@ -350,7 +440,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 if (text.isBlank()) { input.error = "내용을 입력해 주세요."; return@setOnClickListener }
                 if (entry == null) {
                     dialog.dismiss()
-                    saveDiary(text, false)
+                    saveTypedDiary(text)
                 } else if (db.replace(entry.copy(body = text))) {
                     dialog.dismiss()
                     host.render()
@@ -427,6 +517,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         }
         val covers = listOf("#e9cfc7", "#dbe4cf", "#efe0b6", "#e3d9ed", "#ead8bc", "#d4e2e1")
         val spines = listOf("#bd8478", "#889a70", "#c8a04e", "#a492bc", "#bc956b", "#819fa0")
+        val entriesByMonth = db.entries().filter { it.date.year == month.year }.groupBy { it.date.monthValue }
         repeat(6) { i ->
             val m = half * 6 + i + 1
             val x = 133 + i % 3 * 313
@@ -436,7 +527,11 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             panel(x, y, 124, 126, covers[i])
             panel(x, y, 19, 126, spines[i])
             repeat(4) { ring -> panel(x - 6, y + 19 + ring * 25, 16, 5, paper) }
-            art("book$m", x + 28, y + 15, 96, 100)
+            val entries = entriesByMonth[m].orEmpty()
+            val coverFlower = entries.firstNotNullOfOrNull { it.mood }
+            if (coverFlower != null) art("flower${coverFlower.art}", x + 27, y + 8, 94, 84)
+            label(if (entries.isEmpty()) "기록 없음" else "${entries.size}편",
+                x + 20, y + 91, 104, 28, 13f, center = true)
             label("${m}월", x, y + 136, 124, 28, 17f, center = true)
             hit("${m}월 일기장", x - 6, y, 144, 156) { openMonth(YearMonth.of(month.year, m)) }
         }
@@ -485,7 +580,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 }
                 host.surface.place(sprout, x + 222, y + 19, 50, 58)
             } else {
-                art("evening", x + 219, y + 12, 63, 66)
+                val mood = entries.firstNotNullOfOrNull { it.mood }
+                art(mood?.let { "flower${it.art}" } ?: "morning", x + 219, y + 12, 63, 66)
                 hit("${month.monthValue}월 ${day}일 일기 보기", x, y, 289, 99) { selectDay(entries, "dates") }
             }
         }
@@ -512,7 +608,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         panel(47, 137, 344, 308, "#f0e9d9")
         panel(398, 137, 582, 308)
         label(entry.date.format(shortDate), 67, 154, 304, 46, 23f, bold = true)
-        art(if (entry.flower != null) "evening" else "morning", 110, 186, 197, 198)
+        art(entry.flower?.let { "flower${it.art}" } ?: "morning", 110, 186, 197, 198)
         label(entry.flower?.let { "${it.flower} · ${it.meaning}" } ?: "${entry.moment} 일기",
             65, 382, 310, 43, 19f, center = true)
         listOf("요약 일기", "시간별 기록", "음성 기록").forEachIndexed { i, value ->

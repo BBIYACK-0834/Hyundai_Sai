@@ -198,6 +198,8 @@ class MainActivity : Activity() {
         // Management is accessible through Android Back, preserving the Figma canvas.
     }
 
+    internal val isJournalVisible get() = screen == "journal"
+
     internal fun weatherScreenSaved() {
         screen = "journal"
         journal.go("home")
@@ -207,12 +209,17 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, permissions: Array<String>, results: IntArray) {
         super.onRequestPermissionsResult(code, permissions, results)
-        if (code == 42 && screen == "journal") journal.permissionResult(results.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+        if (code == 42) journal.permissionResult(results.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
     }
 
     override fun onStop() {
         journal.stopTransientWork()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        journal.cancelSpeech()
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -223,6 +230,7 @@ class MainActivity : Activity() {
     @Deprecated("Platform back callback retained for API 28 compatibility")
     override fun onBackPressed() {
         if (screen == "journal" && journal.back()) return
+        if (screen == "journal") journal.stopTransientWork()
         if (screen == "profile") { if (store.hasProfile()) { profile = store.load(); screen = "seed"; render() } else finish(); return }
         AlertDialog.Builder(this).setTitle("정보 관리")
             .setItems(arrayOf("내 정보와 첫 목표 수정", "씨앗 화면 보기", "저장한 정보 모두 삭제", "앱 종료")) { _, item ->

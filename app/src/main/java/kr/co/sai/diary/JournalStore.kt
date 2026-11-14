@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.util.UUID
@@ -62,10 +63,13 @@ internal class JournalStore(context: Context) {
         return prefs.edit().putString("entries", array.toString()).commit()
     }
 
-    fun add(body: String, moment: String, voice: Boolean): Diary? {
-        val entry = Diary(UUID.randomUUID().toString(), LocalDate.now(), LocalTime.now().withNano(0),
-            body.trim(), moment, voice, null)
-        return entry.takeIf { save(entries() + entry) }
+    fun add(
+        body: String, moment: String, voice: Boolean,
+        recordedAt: LocalDateTime = LocalDateTime.now(),
+        id: String = UUID.randomUUID().toString()
+    ): Diary? {
+        val entry = Diary(id, recordedAt.toLocalDate(), recordedAt.toLocalTime(), body.trim(), moment, voice, null)
+        return entry.takeIf { save(entries().filterNot { it.id == id } + entry) }
     }
 
     fun replace(entry: Diary) = save(entries().map { if (it.id == entry.id) entry else it })
