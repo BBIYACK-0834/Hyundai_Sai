@@ -27,6 +27,7 @@ class ProfileStore(context: Context) {
     fun hasProfile() = prefs.getBoolean("onboarded", false)
     fun plantedToday() = prefs.getString("plantedDate", null) == java.time.LocalDate.now().toString()
     fun plant() = prefs.edit().putString("plantedDate", java.time.LocalDate.now().toString()).commit()
+    fun hasWeather() = prefs.contains("weather")
     fun weather() = prefs.getString("weather", "낮 맑음")!!
     fun setWeather(value: String) = prefs.edit().putString("weather", value).commit()
     fun clear() = prefs.edit().clear().commit()

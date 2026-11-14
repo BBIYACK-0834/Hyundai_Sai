@@ -14,9 +14,10 @@ import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
-    private lateinit var store: ProfileStore
-    private lateinit var surface: DesignSurface
-    private var profile = Profile()
+    internal lateinit var store: ProfileStore
+    internal lateinit var surface: DesignSurface
+    internal var profile = Profile()
+    internal lateinit var journal: JournalScreens
     private var screen = "profile"
     private val brown = "#4b372f"
     private val green = "#e9efdf"
@@ -27,6 +28,7 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         store = ProfileStore(this)
+        journal = JournalScreens(this, savedInstanceState)
         profile = store.load()
         if (savedInstanceState != null) {
             profile = Profile(savedInstanceState.getString("nickname", profile.nickname),
@@ -37,7 +39,7 @@ class MainActivity : Activity() {
         }
         screen = savedInstanceState?.getString("screen") ?: when {
             !store.hasProfile() -> "profile"
-            store.plantedToday() -> "weather"
+            store.plantedToday() -> if (store.hasWeather()) "journal" else "weather"
             else -> "seed"
         }
         render()
@@ -45,6 +47,7 @@ class MainActivity : Activity() {
 
     override fun onSaveInstanceState(out: Bundle) {
         super.onSaveInstanceState(out)
+        journal.saveState(out)
         out.putString("screen", screen)
         out.putString("nickname", profile.nickname); out.putString("moment", profile.moment)
         out.putString("age", profile.age); out.putString("gender", profile.gender)
@@ -56,7 +59,7 @@ class MainActivity : Activity() {
         if (selected) setStroke((2 * resources.displayMetrics.density).toInt(), Color.parseColor(rose))
     }
 
-    private fun label(value: String, x: Number, y: Number, w: Number, h: Number,
+    internal fun label(value: String, x: Number, y: Number, w: Number, h: Number,
                       size: Float = 17f, color: String = brown, bold: Boolean = false): TextView {
         val view = TextView(this).apply {
             text = value; setTextColor(Color.parseColor(color)); gravity = Gravity.CENTER_VERTICAL
@@ -69,7 +72,7 @@ class MainActivity : Activity() {
         return view
     }
 
-    private fun button(value: String, x: Number, y: Number, w: Number, h: Number,
+    internal fun button(value: String, x: Number, y: Number, w: Number, h: Number,
                        size: Float = 16.8f, bg: String = green, fg: String = "#58674b",
                        selected: Boolean = false, action: () -> Unit): Button {
         val view = Button(this).apply {
@@ -88,15 +91,20 @@ class MainActivity : Activity() {
         return view
     }
 
-    private fun panel(x: Number, y: Number, w: Number, h: Number, color: String) {
+    internal fun panel(x: Number, y: Number, w: Number, h: Number, color: String) {
         surface.place(View(this).apply { background = rounded(color) }, x, y, w, h)
     }
 
-    private fun render() {
+    internal fun render() {
         surface = DesignSurface(this)
         surface.setBackgroundColor(Color.parseColor(if (screen == "weather") "#fcf6ed" else "#fff9f0"))
         setContentView(surface)
-        when (screen) { "profile" -> profileScreen(); "seed" -> seedScreen(); else -> weatherScreen() }
+        when (screen) {
+            "profile" -> profileScreen()
+            "seed" -> seedScreen()
+            "weather" -> weatherScreen()
+            else -> journal.render()
+        }
     }
 
     private fun profileScreen() {
@@ -182,7 +190,7 @@ class MainActivity : Activity() {
                 val value = "$period $weather"
                 button(weather, 172 + i * 197.2, 159.2 + row * 116.8, 172, 66.4, 24f,
                     colors[row * 4 + i], if (row == 0) "#403c34" else "#fff6eb", store.weather() == value) {
-                    if (store.setWeather(value)) { render(); Toast.makeText(this, "$value 선택됨", Toast.LENGTH_SHORT).show() }
+                    if (store.setWeather(value)) weatherScreenSaved()
                     else Toast.makeText(this, "설정을 저장하지 못했어요.", Toast.LENGTH_LONG).show()
                 }
             }
@@ -190,8 +198,31 @@ class MainActivity : Activity() {
         // Management is accessible through Android Back, preserving the Figma canvas.
     }
 
+    internal fun weatherScreenSaved() {
+        screen = "journal"
+        journal.go("home")
+    }
+
+    internal fun changeWeather() { screen = "weather"; render() }
+
+    override fun onRequestPermissionsResult(code: Int, permissions: Array<String>, results: IntArray) {
+        super.onRequestPermissionsResult(code, permissions, results)
+        if (code == 42 && screen == "journal") journal.permissionResult(results.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+
+    override fun onStop() {
+        journal.stopTransientWork()
+        super.onStop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (screen == "journal") render()
+    }
+
     @Deprecated("Platform back callback retained for API 28 compatibility")
     override fun onBackPressed() {
+        if (screen == "journal" && journal.back()) return
         if (screen == "profile") { if (store.hasProfile()) { profile = store.load(); screen = "seed"; render() } else finish(); return }
         AlertDialog.Builder(this).setTitle("정보 관리")
             .setItems(arrayOf("내 정보와 첫 목표 수정", "씨앗 화면 보기", "저장한 정보 모두 삭제", "앱 종료")) { _, item ->
@@ -199,9 +230,9 @@ class MainActivity : Activity() {
                     0 -> { profile = store.load(); screen = "profile"; render() }
                     1 -> { screen = "seed"; render() }
                     2 -> AlertDialog.Builder(this).setTitle("저장한 정보를 삭제할까요?")
-                        .setMessage("호칭, 기록할 순간, 연령대, 성별, 목표와 씨앗·날씨 선택이 삭제돼요.")
+                        .setMessage("호칭, 기록할 순간, 연령대, 성별, 목표, 일기와 씨앗·날씨 선택이 삭제돼요.")
                         .setNegativeButton("취소", null).setPositiveButton("삭제") { _, _ ->
-                            if (store.clear()) { profile = Profile(); screen = "profile"; render() }
+                            if (journal.clear() && store.clear()) { profile = Profile(); screen = "profile"; render() }
                             else Toast.makeText(this, "삭제하지 못했어요.", Toast.LENGTH_LONG).show()
                         }.show()
                     3 -> finish()

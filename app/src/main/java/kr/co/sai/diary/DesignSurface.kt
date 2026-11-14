@@ -25,7 +25,7 @@ class DesignSurface(context: Context) : FrameLayout(context) {
                 if (baseSize != null) view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, baseSize * scale)
             }
             view.measure(MeasureSpec.makeMeasureSpec((slot.w * scale).toInt(), MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec((slot.h * scale).toInt(), MeasureSpec.EXACTLY))
+                MeasureSpec.makeMeasureSpec(maxOf(1, (slot.h * scale).toInt()), MeasureSpec.EXACTLY))
         }
     }
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {

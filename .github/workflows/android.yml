@@ -1,4 +1,4 @@
-name: Android build and row 01 tests
+name: Android build and instrumented tests
 on:
   push:
     branches: [main, feat/sai-pleos-android]
@@ -25,7 +25,7 @@ jobs:
       - run: ./gradlew assembleDebug lintDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: sai-row01-debug-apk
+          name: sai-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
       - name: Enable KVM for emulator
         run: |
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sai-row01-test-reports
+          name: sai-test-reports
           path: |
             app/build/reports/
             app/build/outputs/androidTest-results/
