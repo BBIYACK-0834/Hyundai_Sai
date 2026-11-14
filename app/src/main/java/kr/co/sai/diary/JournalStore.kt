@@ -35,12 +35,23 @@ internal enum class Mood(val title: String, val flower: String, val meaning: Str
 internal data class Diary(
     val id: String, val date: LocalDate, val time: LocalTime, val body: String,
     val moment: String, val voice: Boolean, val flower: Mood?,
-    val emotion: Mood = Mood.classify(body)
+    val emotion: Mood = Mood.classify(body),
+    val tags: List<String> = suggestDiaryTags(body)
 ) {
+    val isDemo get() = id.startsWith("demo-") && moment.startsWith("시연 예시")
     val summary get() = body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(70)
     val mood get() = flower ?: emotion
 }
 
+
+internal fun normalizeDiaryTags(text: String): List<String> = text.split(Regex("[,，#\\s]+"))
+    .map { it.trim().take(12) }.filter { it.isNotEmpty() }.distinct().take(6)
+
+internal fun suggestDiaryTags(text: String): List<String> = listOf(
+    "출근" to "출근|출발", "업무" to "업무|작업|회의|발표", "동료" to "동료",
+    "점심" to "점심|식사", "퇴근" to "퇴근|집에", "노을" to "노을|주황빛",
+    "음악" to "음악|노래", "휴식" to "쉼|쉬|숨을 고르|여유"
+).filter { (_, pattern) -> Regex(pattern).containsMatchIn(text) }.map { it.first }.take(6)
 
 internal fun summarizeDay(records: List<Diary>): String {
     val sentenceBreak = Regex("(?<=[.!?。！？])\\s+|[\\r\\n]+")
@@ -71,7 +82,10 @@ internal class JournalStore(context: Context) {
                 entry.getString("moment"), entry.optBoolean("voice"),
                 Mood.entries.find { it.name == entry.optString("flower") },
                 Mood.entries.find { it.name == entry.optString("emotion") }
-                    ?: Mood.classify(entry.getString("body")))
+                    ?: Mood.classify(entry.getString("body")),
+                entry.optJSONArray("tags")?.let { tags ->
+                    normalizeDiaryTags((0 until tags.length()).joinToString(",") { tags.getString(it) })
+                } ?: suggestDiaryTags(entry.getString("body")))
         }.sortedWith(compareByDescending<Diary> { it.date }.thenByDescending { it.time })
     }
 
@@ -81,7 +95,8 @@ internal class JournalStore(context: Context) {
             array.put(JSONObject().put("id", entry.id).put("date", entry.date.toString())
                 .put("time", entry.time.toString()).put("body", entry.body)
                 .put("moment", entry.moment).put("voice", entry.voice)
-                .put("flower", entry.flower?.name).put("emotion", entry.emotion.name))
+                .put("flower", entry.flower?.name).put("emotion", entry.emotion.name)
+                .put("tags", JSONArray(entry.tags)))
         }
         return prefs.edit().putString("entries", array.toString()).commit()
     }
@@ -89,9 +104,11 @@ internal class JournalStore(context: Context) {
     fun add(
         body: String, moment: String, voice: Boolean,
         recordedAt: LocalDateTime = LocalDateTime.now(),
-        id: String = UUID.randomUUID().toString()
+        id: String = UUID.randomUUID().toString(),
+        tags: List<String> = suggestDiaryTags(body)
     ): Diary? {
-        val entry = Diary(id, recordedAt.toLocalDate(), recordedAt.toLocalTime(), body.trim(), moment, voice, null)
+        val entry = Diary(id, recordedAt.toLocalDate(), recordedAt.toLocalTime(), body.trim(), moment, voice, null,
+            tags = normalizeDiaryTags(tags.joinToString(",")))
         return entry.takeIf { save(entries().filterNot { it.id == id } + entry) }
     }
 
@@ -110,18 +127,53 @@ internal class JournalStore(context: Context) {
         return count
     }
 
+    // Keep the sample date stable so the November 13 demo can be revisited later.
     fun seedYesterday(today: LocalDate = LocalDate.now()): Boolean {
-        if (prefs.getBoolean("demo_yesterday_seeded", false)) return true
-        val yesterday = today.minusDays(1)
-        if (entries().none { it.date == yesterday } && add(
-                "퇴근길에 노을을 보니 마음이 편안해졌어요. 바쁘게 흘러간 하루 끝에 좋아하는 음악을 들으며 천천히 집에 오는 시간이 작은 쉼이 되었어요.\n\n아침에는 처리할 일이 많아 서둘러 출근했어요. 오전에 막혔던 일을 동료와 함께 정리하고, 점심에는 따뜻한 밥을 먹으며 잠깐 일상 이야기를 나눴어요. 오후에는 미뤄두었던 작업을 하나 마무리해서 한결 홀가분했어요.\n\n신호를 기다리며 창밖을 보니 하늘이 주황빛으로 물들어 있었어요. 늘 지나던 길인데 오늘은 가로수와 거리의 불빛이 유난히 눈에 들어왔어요. 차 안에서 잠시 숨을 고르니 복잡했던 생각도 차분해졌어요.\n\n집에 도착하면 따뜻한 물로 씻고 저녁을 챙겨 먹으려고 해요. 오늘 할 일을 모두 끝내지는 못했지만, 애쓴 나에게 이 정도면 잘했다고 말해주고 싶어요. 내일 아침에는 조금 일찍 나와 여유 있게 하루를 시작해봐야겠어요.",
-                "시연 예시", voice = false, recordedAt = yesterday.atTime(18, 40), id = "demo-yesterday"
-            ) == null) return false
-        return prefs.edit().putBoolean("demo_yesterday_seeded", true).commit()
+        if (prefs.getBoolean("demo_day_v2_seeded", false)) return true
+        val current = entries()
+        val previous = current.firstOrNull { it.id == "demo-yesterday" }
+        // A removed sample must stay removed on upgrade.
+        if (previous == null && prefs.getBoolean("demo_yesterday_seeded", false)) {
+            return prefs.edit().putBoolean("demo_day_v2_seeded", true).commit()
+        }
+        val date = previous?.date ?: LocalDate.of(2026, 11, 13)
+        val samples = demoDayEntries(date)
+        val legacyBodies = setOf(
+            "퇴근길에 노을을 보니 마음이 편안해졌어요. 좋아하는 음악을 들으며 천천히 집에 왔어요.",
+            "퇴근길에 노을을 보니 마음이 편안해졌어요. 바쁘게 흘러간 하루 끝에 좋아하는 음악을 들으며 천천히 집에 오는 시간이 작은 쉼이 되었어요.\n\n아침에는 처리할 일이 많아 서둘러 출근했어요. 오전에 막혔던 일을 동료와 함께 정리하고, 점심에는 따뜻한 밥을 먹으며 잠깐 일상 이야기를 나눴어요. 오후에는 미뤄두었던 작업을 하나 마무리해서 한결 홀가분했어요.\n\n신호를 기다리며 창밖을 보니 하늘이 주황빛으로 물들어 있었어요. 늘 지나던 길인데 오늘은 가로수와 거리의 불빛이 유난히 눈에 들어왔어요. 차 안에서 잠시 숨을 고르니 복잡했던 생각도 차분해졌어요.\n\n집에 도착하면 따뜻한 물로 씻고 저녁을 챙겨 먹으려고 해요. 오늘 할 일을 모두 끝내지는 못했지만, 애쓴 나에게 이 정도면 잘했다고 말해주고 싶어요. 내일 아침에는 조금 일찍 나와 여유 있게 하루를 시작해봐야겠어요."
+        )
+        val keepPrevious = previous != null &&
+            (previous.body !in legacyBodies || previous.moment != "시연 예시" || previous.voice || previous.flower != null)
+        val additions = samples.filter { sample ->
+            current.none { it.id == sample.id } || (sample.id == "demo-yesterday" && !keepPrevious)
+        }
+        val next = current.filterNot { old -> additions.any { it.id == old.id } } + additions
+        if (!save(next)) return false
+        return prefs.edit().putBoolean("demo_yesterday_seeded", true)
+            .putBoolean("demo_day_v2_seeded", true).commit()
     }
 
+    fun upgradeExistingDemo(): Boolean =
+        !prefs.getBoolean("demo_yesterday_seeded", false) || seedYesterday()
+
+    private fun demoDayEntries(date: LocalDate): List<Diary> = listOf(
+        Diary("demo-nov13-morning", date, LocalTime.of(8, 30),
+            "아침에는 처리할 일이 많아 평소보다 서둘러 출근했어요. 오전 회의에서 발표할 생각에 조금 긴장했어요. " +
+                "차 안에서 오늘 할 일을 차례대로 정리하고 깊게 숨을 쉬었어요. 한 번에 다 해내기보다 하나씩 마무리해보려고 해요.",
+            "시연 예시 · 출근", true, null, tags = listOf("출근", "업무", "발표", "마음정리")),
+        Diary("demo-nov13-noon", date, LocalTime.of(12, 40),
+            "오전에 막혔던 작업을 동료와 함께 정리해서 마음이 한결 편안해졌어요. 점심에는 따뜻한 밥을 먹으며 " +
+                "주말 계획 이야기를 나눴어요. 잠깐 웃고 나니 어깨에 들어갔던 힘도 풀렸어요. " +
+                "혼자 끙끙대기보다 도움을 구해도 괜찮다는 걸 다시 느꼈어요.",
+            "시연 예시 · 점심", false, null, tags = listOf("업무", "동료", "점심", "감사")),
+        Diary("demo-yesterday", date, LocalTime.of(18, 40),
+            "퇴근길에 노을을 보니 마음이 편안해졌어요. 바쁘게 흘러간 하루 끝에 좋아하는 음악을 들으며 천천히 집에 오는 시간이 작은 쉼이 되었어요.\n\n아침에는 처리할 일이 많아 서둘러 출근했어요. 오전에 막혔던 일을 동료와 함께 정리하고, 점심에는 따뜻한 밥을 먹으며 잠깐 일상 이야기를 나눴어요. 오후에는 미뤄두었던 작업을 하나 마무리해서 한결 홀가분했어요.\n\n신호를 기다리며 창밖을 보니 하늘이 주황빛으로 물들어 있었어요. 늘 지나던 길인데 오늘은 가로수와 거리의 불빛이 유난히 눈에 들어왔어요. 차 안에서 잠시 숨을 고르니 복잡했던 생각도 차분해졌어요.\n\n집에 도착하면 따뜻한 물로 씻고 저녁을 챙겨 먹으려고 해요. 오늘 할 일을 모두 끝내지는 못했지만, 애쓴 나에게 이 정도면 잘했다고 말해주고 싶어요. 내일 아침에는 조금 일찍 나와 여유 있게 하루를 시작해봐야겠어요.",
+            "시연 예시 · 퇴근", true, Mood.CALM,
+            tags = listOf("퇴근", "노을", "음악", "휴식", "내일의다짐"))
+    )
+
     fun bloomToday(today: LocalDate = LocalDate.now(), preferredId: String? = null): Boolean {
-        val records = entries().filter { it.date == today && it.id != "demo-yesterday" }
+        val records = entries().filter { it.date == today && !it.isDemo }
         val entry = records.firstOrNull { it.id == preferredId } ?: records.firstOrNull() ?: return true
         return entry.flower != null || replace(entry.copy(flower = entry.emotion))
     }

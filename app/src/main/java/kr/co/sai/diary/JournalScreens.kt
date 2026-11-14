@@ -127,6 +127,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         return true
     }
 
+    init {
+        if (!db.upgradeExistingDemo()) message = "예시 기록을 갱신하지 못했어요. 앱을 다시 열어주세요."
+    }
+
     fun prepareDemoDay() = db.seedYesterday(today)
 
     fun clear(): Boolean {
@@ -530,8 +534,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
-    private fun saveTypedDiary(body: String) {
-        val entry = db.add(body, if (night) "도착" else "출발", voice = false)
+    private fun saveTypedDiary(body: String, tags: List<String> = suggestDiaryTags(body)) {
+        val entry = db.add(body, if (night) "도착" else "출발", voice = false, tags = tags)
         if (entry == null) {
             editDiary(null, "저장하지 못했어요. 다시 시도해 주세요.", body)
             return
@@ -544,14 +548,28 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private fun editDiary(entry: Diary?, reason: String? = null, draft: String = entry?.body.orEmpty()) {
         val input = EditText(host).apply {
             setText(draft)
+            contentDescription = "일기 본문"
             hint = "오늘의 마음을 적어주세요"
             minLines = 3
             gravity = Gravity.TOP
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
             filters = arrayOf(InputFilter.LengthFilter(12000))
         }
+        val tagInput = EditText(host).apply {
+            contentDescription = "일기 태그"
+            hint = "태그 · 쉼표로 구분 (최대 6개)"
+            setSingleLine(true)
+            setText(entry?.tags?.joinToString(", ").orEmpty())
+            filters = arrayOf(InputFilter.LengthFilter(200))
+        }
+        val fields = android.widget.LinearLayout(host).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(24, 0, 24, 0)
+            addView(input)
+            addView(tagInput)
+        }
         val dialog = AlertDialog.Builder(host).setTitle(if (entry == null) "일기 남기기" else "일기 수정")
-            .setMessage(reason).setView(input).setNegativeButton("취소", null)
+            .setMessage(reason).setView(fields).setNegativeButton("취소", null)
             .setPositiveButton("저장", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -559,8 +577,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 if (text.isBlank()) { input.error = "내용을 입력해 주세요."; return@setOnClickListener }
                 if (entry == null) {
                     dialog.dismiss()
-                    saveTypedDiary(text)
-                } else if (db.replace(entry.copy(body = text, emotion = Mood.classify(text)))) {
+                    saveTypedDiary(text, tagInput.text.toString().takeIf { it.isNotBlank() }
+                        ?.let(::normalizeDiaryTags) ?: suggestDiaryTags(text))
+                } else if (db.replace(entry.copy(body = text, emotion = Mood.classify(text),
+                        tags = normalizeDiaryTags(tagInput.text.toString())))) {
                     dialog.dismiss()
                     host.render()
                 } else msg("수정 내용을 저장하지 못했어요.")
@@ -649,9 +669,11 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             button("연도 선택", 407, 361, 210, 43) { go("years") }
             return
         }
-        listOf("오늘 일기" to today, "어제 일기" to today.minusDays(1)).forEachIndexed { index, (title, date) ->
+        val shortcuts = listOf("오늘 일기" to today, "어제 일기" to today.minusDays(1)) +
+            records.firstOrNull { it.isDemo }?.let { listOf("시연 일기" to it.date) }.orEmpty()
+        shortcuts.forEachIndexed { index, (title, date) ->
             val dayEntries = records.filter { it.date == date }
-            if (dayEntries.isNotEmpty()) button(title, 46 + index * 133, 88, 124, 38) {
+            if (dayEntries.isNotEmpty()) button(title, 46 + index * 121, 88, 110, 38) {
                 selectDay(dayEntries, "books")
             }
         }
@@ -790,7 +812,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         art(characterArt(topMood), 100, 198, 151, 121, topMood.flower)
         label(if (detailTab == 0) "하루 대표 감정 · ${topMood.title}" else "감정 · ${topMood.title}",
             61, 323, 228, 34, 16f, bold = true, center = true)
-        label(if (detailTab == 0) "${dayEntries.size}개의 기록을 모았어요" else selected?.flower?.flower.orEmpty(),
+        label(if (detailTab == 0) "${dayEntries.size}개의 기록을 모았어요" else selected?.moment.orEmpty(),
             61, 362, 228, 28, 14f, muted, center = true)
 
         listOf("요약 일기", "시간별 기록", "음성 기록").forEachIndexed { i, value ->
@@ -805,7 +827,9 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         val content = when (detailTab) {
             0 -> summarizeDay(dayEntries)
             1 -> selected?.body.orEmpty()
-            else -> selected?.body ?: "음성으로 작성한 기록이 없어요."
+            else -> selected?.let {
+                (if (it.isDemo) "시연용 음성 변환 예시 · 실제 녹음 없음\n\n" else "") + it.body
+            } ?: "음성으로 작성한 기록이 없어요."
         }
         val body = android.widget.TextView(host).apply {
             text = content
@@ -813,7 +837,21 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             setTextColor(Color.parseColor(brown))
             setLineSpacing(5f, 1f)
         }
-        val bodyTop = if (hasTimePicker) 241 else 159
+        val tagTop = if (hasTimePicker) 241 else 153
+        val tags = if (detailTab == 0) dayEntries.flatMap { it.tags }.distinct().take(6)
+            else selected?.tags.orEmpty()
+        if (tags.isNotEmpty()) {
+            val tagText = android.widget.TextView(host).apply {
+                text = tags.joinToString("   ") { "#$it" }
+                contentDescription = "일기 태그: ${tags.joinToString(", ")}"
+                setTextColor(Color.parseColor("#536548"))
+                textSize = 14f
+                setSingleLine(true)
+            }
+            host.surface.place(android.widget.HorizontalScrollView(host).apply { addView(tagText) },
+                339, tagTop, 617, 28)
+        }
+        val bodyTop = if (tags.isEmpty()) tagTop else tagTop + 34
         val editing = selected?.takeIf { detailTab != 0 }
         val bodyBottom = if (editing == null) 398 else 360
         host.surface.place(ScrollView(host).apply { addView(body) }, 339, bodyTop, 617, bodyBottom - bodyTop)
