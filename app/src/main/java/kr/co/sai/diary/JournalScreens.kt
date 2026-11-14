@@ -720,7 +720,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             val entries = entriesByMonth[m].orEmpty()
             val coverFlower = entries.firstOrNull()?.mood
             if (coverFlower != null) art(characterArt(coverFlower), x + 27, y + 8, 94, 84)
-            label(if (entries.isEmpty()) "기록 없음" else "${entries.size}편",
+            label(if (entries.isEmpty()) "기록 없음" else "${entries.map { it.date }.distinct().size}편",
                 x + 20, y + 91, 104, 28, 13f, center = true)
             label("${m}월", x, y + 136, 124, 28, 17f, center = true)
             hit("${m}월 일기장", x - 6, y, 144, 156) { openMonth(YearMonth.of(month.year, m)) }
@@ -1161,7 +1161,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 button("${month.monthValue}월 꽃다발 보기 ›", 517, 404, 448, 33) { go("recap") }
             }
             else -> {
-                val tiles = listOf("${entries.size}편" to "작성한 일기",
+                val tiles = listOf("${entries.map { it.date }.distinct().size}편" to "작성한 일기",
                     "${db.streak()}일" to "연속 기록", "${completion()}%" to "오늘 목표 실행률",
                     "${flowers.map { it.date }.distinct().size}송이" to "모은 꽃")
                 tiles.forEachIndexed { i, (value, caption) ->
