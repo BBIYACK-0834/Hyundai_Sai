@@ -110,7 +110,7 @@ class ProfileFlowTest {
                 assertTrue(db.seedYesterday())
                 assertEquals(3, db.entries().size)
                 assertTrue(db.saveSpokenGoal("오늘은 퇴근 후에 산책하고 싶어요."))
-                assertEquals(listOf("오늘 10분 몸 움직이기"), db.tasks(""))
+                assertEquals(listOf("오늘은 퇴근 후에 산책하고 싶어요."), db.tasks(""))
                 val entry = checkNotNull(db.add("오늘 기쁘고 즐거운 일이 있었어요.", "출발", true))
                 assertEquals(Mood.JOY, entry.emotion)
                 assertNull(entry.flower)
@@ -192,7 +192,7 @@ class ProfileFlowTest {
             "도착", true, now.withHour(18).withMinute(40)))
         val morning = checkNotNull(db.add("아침에 발표했어요. 시작할 때는 긴장했어요. 커피도 샀어요.",
             "출발", true, now.withHour(8).withMinute(30)))
-        val summary = "아침에 발표했어요. 시작할 때는 긴장했어요.\n\n저녁에 산책했어요. 노을을 보니 행복했어요."
+        val summary = "08:30 · 걱정\n아침에 발표했어요. 시작할 때는 긴장했어요.\n\n18:40 · 기쁨\n저녁에 산책했어요. 노을을 보니 행복했어요."
         assertEquals(summary, summarizeDay(listOf(evening, morning)))
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -317,6 +317,52 @@ class ProfileFlowTest {
             scenario.onActivity { click(it, "음성 기록"); click(it, "18:40 · 평온") }
             capture("06-demo-voice")
         }
+    }
+
+    @Test fun firstMorningAnswerIsSavedExactlyAndSurvivesRestart() {
+        val db = JournalStore(context)
+        val date = java.time.LocalDate.now()
+        assertFalse(db.hasMorningGoal(date))
+        assertFalse(db.saveSpokenGoal("  ", date))
+        assertFalse(db.hasMorningGoal(date))
+        ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString().contains("목표는 무엇인가요?") })
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .any { it.contentDescription == "목표 답하기" })
+            }
+        }
+        val answer = "오늘은 퇴근 후 20분 산책하고 싶어요."
+        assertTrue(db.saveSpokenGoal(answer, date))
+        assertTrue(JournalStore(context).hasMorningGoal(date))
+        assertEquals(listOf(answer), JournalStore(context).tasks(""))
+        assertTrue(db.entries().isEmpty())
+        assertFalse(db.hasMorningGoal(date.plusDays(1)))
+        ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .any { it.contentDescription == "일기 녹음" })
+            }
+        }
+    }
+
+    @Test fun equalTextAtDifferentTimesRemainsInDailySummary() {
+        val db = JournalStore(context)
+        val now = LocalDateTime.now()
+        val first = checkNotNull(db.add("오늘은 마음이 편안했어요.", "출발", false, now.withHour(8).withMinute(30)))
+        val last = checkNotNull(db.add(first.body, "도착", false, now.withHour(18).withMinute(40)))
+        val summary = summarizeDay(listOf(last, first))
+        assertTrue(summary.indexOf("08:30") < summary.indexOf("18:40"))
+        assertEquals(2, Regex("오늘은 마음이 편안했어요").findAll(summary).count())
+        assertEquals(Mood.JOY, Mood.classify("작업을 끝내서 뿌듯하고 고마웠어요."))
+        assertEquals(Mood.WORRY, Mood.classify("내일 발표가 걱정되고 불안해요."))
+        assertEquals(Mood.TIRED, Mood.classify("피곤하고 지쳤어요."))
+        assertEquals(Mood.SAD, Mood.classify("외로워서 눈물이 났어요."))
+        assertEquals(Mood.EXCITED, Mood.classify("내일 여행이 기대되고 설레요."))
+        assertEquals(Mood.CALM, Mood.classify("특별한 표현이 없는 기록"))
     }
 
 }
