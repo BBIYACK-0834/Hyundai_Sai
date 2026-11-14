@@ -361,4 +361,23 @@ class ProfileFlowTest {
         assertEquals(Mood.CALM, Mood.classify("특별한 표현이 없는 기록"))
     }
 
+    @Test fun morningAnswerKeepsExistingGoalsChecksAndDuration() {
+        val db = JournalStore(context)
+        val existing = listOf("물 마시기", "숨 고르기", "일기 남기기")
+        assertTrue(db.saveGoal(existing, 14))
+        assertTrue(db.toggle(existing.first()))
+        val end = db.goalEnd()
+        val answer = "퇴근 후 20분 산책하기"
+        assertTrue(db.saveSpokenGoal(answer))
+        assertEquals(listOf(answer) + existing, db.tasks(""))
+        assertEquals(setOf(existing.first()), db.checked())
+        assertEquals(14, db.duration())
+        assertEquals(end, db.goalEnd())
+        assertTrue(db.saveSpokenGoal(answer))
+        assertEquals(4, db.tasks("").size)
+        assertTrue(db.saveSpokenGoal("오늘은 책 읽기"))
+        assertEquals(listOf("오늘은 책 읽기") + existing, JournalStore(context).tasks(""))
+        assertEquals(existing, db.tasks("", java.time.LocalDate.now().plusDays(1)))
+    }
+
 }
