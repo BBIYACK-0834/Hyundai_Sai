@@ -15,8 +15,8 @@ android {
         applicationId = "kr.co.sai.diary"
         minSdk = 28
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.2.3"
         ndk { abiFilters += listOf("x86_64", "arm64-v8a") }
         externalNativeBuild {
             cmake { arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" }
