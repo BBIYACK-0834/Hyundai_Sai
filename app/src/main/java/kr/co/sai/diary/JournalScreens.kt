@@ -551,6 +551,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             contentDescription = "일기 본문"
             hint = "오늘의 마음을 적어주세요"
             minLines = 3
+            maxLines = 5
             gravity = Gravity.TOP
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
             filters = arrayOf(InputFilter.LengthFilter(12000))
@@ -569,7 +570,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             addView(tagInput)
         }
         val dialog = AlertDialog.Builder(host).setTitle(if (entry == null) "일기 남기기" else "일기 수정")
-            .setMessage(reason).setView(fields).setNegativeButton("취소", null)
+            .setMessage(reason).setView(ScrollView(host).apply { addView(fields) }).setNegativeButton("취소", null)
             .setPositiveButton("저장", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
