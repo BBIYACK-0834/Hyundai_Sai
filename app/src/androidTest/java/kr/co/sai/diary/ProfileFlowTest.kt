@@ -28,6 +28,9 @@ class ProfileFlowTest {
     private fun capture(name: String) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
+        // Wait for SurfaceFlinger to present the first frame after launch/navigation.
+        android.os.SystemClock.sleep(1000)
+        instrumentation.waitForIdleSync()
         val bitmap = instrumentation.uiAutomation.takeScreenshot()
         assertNotNull(bitmap)
         val directory = java.io.File(context.externalCacheDir, "screenshots").apply { mkdirs() }

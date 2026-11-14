@@ -74,6 +74,7 @@ class MainActivity : Activity() {
                        selected: Boolean = false, action: () -> Unit): Button {
         val view = Button(this).apply {
             text = value; isAllCaps = false; setPadding(0, 0, 0, 0)
+            elevation = 0f; stateListAnimator = null
             minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
             includeFontPadding = false; gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)

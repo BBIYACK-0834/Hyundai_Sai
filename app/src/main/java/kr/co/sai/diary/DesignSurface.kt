@@ -20,12 +20,12 @@ class DesignSurface(context: Context) : FrameLayout(context) {
         setMeasuredDimension(w, h)
         val scale = minOf(w / 1024f, h / 552f)
         slots.forEach { (view, slot) ->
-            view.measure(MeasureSpec.makeMeasureSpec((slot.w * scale).toInt(), MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec((slot.h * scale).toInt(), MeasureSpec.EXACTLY))
             if (view is android.widget.TextView) {
                 val baseSize = view.getTag(kr.co.sai.diary.R.id.design_text_size) as? Float
                 if (baseSize != null) view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, baseSize * scale)
             }
+            view.measure(MeasureSpec.makeMeasureSpec((slot.w * scale).toInt(), MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec((slot.h * scale).toInt(), MeasureSpec.EXACTLY))
         }
     }
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
