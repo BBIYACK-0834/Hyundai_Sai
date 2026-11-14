@@ -318,7 +318,54 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun tasks() = db.tasks(host.profile.goal)
-    private fun completion(): Int = tasks().count { it in db.checked() } * 100 / tasks().size
+    private fun completion(): Int {
+        val goals = tasks()
+        return if (goals.isEmpty()) 0 else goals.count { it in db.checked() } * 100 / goals.size
+    }
+
+    private fun goalList(x: Int, y: Int, designWidth: Int, height: Int, rowHeight: Int, color: String) {
+        val rows = android.widget.LinearLayout(host).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+        for (task in tasks()) {
+            val checked = task in db.checked()
+            val item = Button(host).apply {
+                text = (if (checked) "✓  " else "□  ") + task
+                contentDescription = task
+                isSelected = checked
+                isAllCaps = false
+                minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
+                setPadding(8, 0, 8, 0)
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                setTextColor(Color.parseColor(brown))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 10f
+                    setColor(Color.parseColor(color))
+                }
+                setOnClickListener {
+                    if (db.toggle(task)) host.render() else msg("목표를 저장하지 못했어요.")
+                }
+            }
+            rows.addView(item, android.widget.LinearLayout.LayoutParams(-1, rowHeight))
+        }
+        val scroll = object : ScrollView(host) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val scale = MeasureSpec.getSize(widthMeasureSpec) / designWidth.toFloat()
+                for (index in 0 until rows.childCount) {
+                    val item = rows.getChildAt(index) as Button
+                    (item.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
+                        this.height = (rowHeight * scale).toInt()
+                        bottomMargin = (3 * scale).toInt()
+                    }
+                    item.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 15f * scale)
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }.apply { addView(rows) }
+        host.surface.place(scroll, x, y, designWidth, height)
+    }
 
     private fun awaitingMorningGoal() = !night && !db.hasMorningGoal(today)
 
@@ -424,12 +471,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             }
         } else {
             label("오늘의 목표", 727, 105, 225, 29, 14f, "#536548", true)
-            if (awaitingMorningGoal()) label("첫 질문에 답하면\n오늘의 목표로 저장돼요.", 727, 139, 238, 88, 17f, center = true)
-            else tasks().take(3).forEachIndexed { i, task ->
-                button((if (task in db.checked()) "✓ " else "□ ") + task, 727, 139 + i * 33, 238, 32, paper) {
-                    if (db.toggle(task)) host.render() else msg("목표를 저장하지 못했어요.")
-                }
-            }
+            if (tasks().size > 2) label("위아래로 보기 ↕", 838, 109, 121, 20, 11f, muted)
+            goalList(727, 139, 238, 99, 44, paper)
             button("목표 살펴보기", 727, 245, 238, 37, rose, paper) { go("goals") }
             button("음성으로 목표 설정", 727, 293, 238, 37) {
                 if (speechPhase == null && voiceDraft == null) {
@@ -984,11 +1027,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         if (page == "goals") {
             panel(66, 156, 892, 286)
             label(today.format(shortDate), 86, 169, 380, 42, 23f, bold = true)
-            tasks().forEachIndexed { i, task ->
-                button((if (task in db.checked()) "✓  " else "□  ") + task, 86, 224 + i * 51, 488, 44, green) {
-                    if (db.toggle(task)) host.render() else msg("목표를 저장하지 못했어요.")
-                }
-            }
+            goalList(86, 224, 488, 205, 44, green)
             val percent = completion()
             label("오늘 실행률  $percent%", 599, 217, 333, 52, 23f, rose, true)
             panel(599, 264, 333, 8, "#e7e5d9")

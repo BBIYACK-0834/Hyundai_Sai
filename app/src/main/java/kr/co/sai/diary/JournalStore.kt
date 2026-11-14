@@ -188,9 +188,11 @@ internal class JournalStore(context: Context) {
     fun saveSpokenGoal(text: String, date: LocalDate = LocalDate.now()): Boolean {
         val answer = text.trim().replace(Regex("\\s+"), " ")
         if (answer.isBlank()) return false
-        return prefs.edit().putString("tasks", answer).putInt("goal_days", 1)
-            .putString("goal_end", date.toString()).putString("morning_goal_date", date.toString())
-            .remove("checked_$date").commit()
+        val edit = prefs.edit()
+        // Earlier demos stored the daily answer in the base-goal slot.
+        if (legacyMorningAnswer() != null) edit.remove("tasks")
+        return edit.putString("morning_goal_answer", answer)
+            .putString("morning_goal_date", date.toString()).commit()
     }
 
     fun demoFlowers(month: YearMonth): List<Diary> = listOf(
@@ -201,7 +203,19 @@ internal class JournalStore(context: Context) {
             "", "시연 예시", false, mood, mood)
     }
 
-    fun tasks(default: String) = prefs.getString("tasks", null)?.split("\n") ?: listOf(default)
+    private fun legacyMorningAnswer(): String? {
+        if (prefs.getString("morning_goal_answer", null) != null ||
+            prefs.getString("morning_goal_date", null) == null) return null
+        return prefs.getString("tasks", null)?.split("\n")?.singleOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    fun tasks(default: String, date: LocalDate = LocalDate.now()): List<String> {
+        val legacy = legacyMorningAnswer()
+        val base = if (legacy != null) listOf(default)
+            else prefs.getString("tasks", null)?.split("\n") ?: listOf(default)
+        val answer = if (hasMorningGoal(date)) prefs.getString("morning_goal_answer", null) ?: legacy else null
+        return (listOfNotNull(answer) + base).filter { it.isNotBlank() }.distinct()
+    }
     fun duration() = prefs.getInt("goal_days", 7)
     fun goalEnd(): LocalDate? = prefs.getString("goal_end", null)?.let(LocalDate::parse)
     fun saveGoal(tasks: List<String>, days: Int) = prefs.edit().putString("tasks", tasks.joinToString("\n"))
