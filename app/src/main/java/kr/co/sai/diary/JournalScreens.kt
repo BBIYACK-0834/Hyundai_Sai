@@ -241,6 +241,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun header() {
+        val demoFuelPercent = 65
         val onDark = page == "home" && night
         val text = if (onDark) paper else brown
         label(if (page == "drive") "주행 화면 시연" else if (page == "home") today.format(dateFormat) else "",
@@ -249,7 +250,11 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         panel(635, 20, 37, 31, if (page == "drive") "#f7edce" else green)
         label(if (page == "drive") "D" else "P", 635, 20, 37, 31, 17f, bold = true, center = true)
         art("fuel", 690, 26, 17, 18)
-        label("—", 715, 17, 44, 37)
+        label("$demoFuelPercent%", 715, 17, 44, 37).contentDescription =
+            "연료 잔량 $demoFuelPercent 퍼센트, 시연용 더미 데이터"
+        hit("연료 잔량 안내", 684, 17, 76, 37) {
+            msg("연료 잔량 ${demoFuelPercent}% · 시연용 데이터예요.")
+        }
         val icon = if (night) listOf("moon", "night_cloud", "night_rain", "night_snow")[sky]
             else listOf("sun", "cloud", "rain", "snow")[sky]
         art(icon, 781, 26, 18, 18)
