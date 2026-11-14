@@ -12,8 +12,8 @@ import java.util.UUID
 internal enum class Mood(val title: String, val flower: String, val meaning: String, val color: String, val art: Int, val words: List<String>) {
     CALM("평온", "술패랭이", "평정", "#9db885", 0, listOf("편안", "평온", "차분", "고요", "안심")),
     WORRY("걱정", "제비꽃", "마음의 평화", "#b8a1c8", 1, listOf("걱정", "불안", "긴장", "부담", "막막")),
-    TIRED("지침", "마삭줄", "다정한 쉼", "#94aeb5", 2, listOf("피곤", "지쳤", "힘들", "지침", "졸려")),
-    JOY("기쁨", "프리지아", "새로운 시작", "#ecc76f", 3, listOf("행복", "기쁘", "기뻤", "즐거", "좋았", "기쁨")),
+    TIRED("지침", "마삭줄", "다정한 쉼", "#94aeb5", 2, listOf("피곤", "지쳤", "힘들", "지침", "졸려", "지치", "녹초")),
+    JOY("기쁨", "프리지아", "새로운 시작", "#ecc76f", 3, listOf("행복", "기쁘", "기뻤", "즐거", "좋았", "기쁨", "뿌듯", "홀가분", "감사", "고마")),
     EXCITED("설렘", "튤립", "설렘", "#e5a5a0", 4, listOf("설레", "설렘", "기대", "두근")),
     SAD("슬픔", "루드베키아", "다시 피어나는 마음", "#a6b5ce", 5, listOf("슬프", "슬펐", "슬픔", "울었", "눈물", "외로"));
 
@@ -56,17 +56,16 @@ internal fun suggestDiaryTags(text: String): List<String> = listOf(
 internal fun summarizeDay(records: List<Diary>): String {
     val sentenceBreak = Regex("(?<=[.!?。！？])\\s+|[\\r\\n]+")
     val whitespace = Regex("\\s+")
-    val seen = mutableSetOf<String>()
     return records.sortedBy { it.time }.mapNotNull { entry ->
         val sentences = entry.body.trim().split(sentenceBreak)
             .map { it.trim().replace(whitespace, " ") }.filter { it.isNotEmpty() }
         val emotionSentence = sentences.indexOfFirst { Mood.scores(it).isNotEmpty() }
         val excerpt = sentences.filterIndexed { index, _ ->
             index == 0 || index == emotionSentence
-        }.filter { seen.add(it) }.joinToString(" ") { sentence ->
+        }.distinct().joinToString(" ") { sentence ->
             if (sentence.length > 140) sentence.take(139).trimEnd() + "…" else sentence
         }
-        excerpt.takeIf { it.isNotEmpty() }
+        excerpt.takeIf { it.isNotEmpty() }?.let { "${entry.time.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))} · ${entry.emotion.title}\n$it" }
     }.joinToString("\n\n")
 }
 
@@ -178,15 +177,16 @@ internal class JournalStore(context: Context) {
         return entry.flower != null || replace(entry.copy(flower = entry.emotion))
     }
 
-    fun saveSpokenGoal(text: String): Boolean {
-        val goal = when {
-            Regex("운동|헬스|산책|걷|달리|스트레칭").containsMatchIn(text) -> "오늘 10분 몸 움직이기"
-            Regex("공부|시험|과제|책|독서").containsMatchIn(text) -> "오늘 집중해서 20분 공부하기"
-            Regex("휴식|쉬|피곤|힘들|여유|긴장|걱정").containsMatchIn(text) -> "잠깐 멈춰 깊게 숨 세 번 고르기"
-            Regex("감사|고마|행복").containsMatchIn(text) -> "오늘 고마웠던 순간 하나 남기기"
-            else -> text.lineSequence().first { it.isNotBlank() }.trim().take(45)
-        }
-        return saveGoal(listOf(goal), 1)
+    fun hasMorningGoal(date: LocalDate = LocalDate.now()) =
+        prefs.getString("morning_goal_date", null) == date.toString()
+
+    // The first answer is the goal itself. Do not replace it with a generic suggestion.
+    fun saveSpokenGoal(text: String, date: LocalDate = LocalDate.now()): Boolean {
+        val answer = text.trim().replace(Regex("\\s+"), " ")
+        if (answer.isBlank()) return false
+        return prefs.edit().putString("tasks", answer).putInt("goal_days", 1)
+            .putString("goal_end", date.toString()).putString("morning_goal_date", date.toString())
+            .remove("checked_$date").commit()
     }
 
     fun demoFlowers(month: YearMonth): List<Diary> = listOf(

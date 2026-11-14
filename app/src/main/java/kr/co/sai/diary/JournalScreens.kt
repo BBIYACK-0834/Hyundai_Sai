@@ -320,6 +320,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private fun tasks() = db.tasks(host.profile.goal)
     private fun completion(): Int = tasks().count { it in db.checked() } * 100 / tasks().size
 
+    private fun awaitingMorningGoal() = !night && !db.hasMorningGoal(today)
+
     private fun home() {
         val records = db.entries()
         val date = if (night) today else today.minusDays(1)
@@ -331,7 +333,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         label(if (night) "오늘의 일기" else "어제의 일기", 60, 104, 235, 28, 14f, "#536548", true)
         label(date.format(shortDate), 59, 138, 240, 30, 20f, bold = true)
         panel(59, 176, 239, 45, "#f3ebdd")
-        label(recent?.summary ?: "아직 남긴 일기가 없어요.", 68, 176, 219, 45, 15f)
+        label(if (entries.isEmpty()) "아직 남긴 일기가 없어요." else summarizeDay(entries).replace("\n", " "), 68, 176, 219, 45, 15f)
         if (recent != null) {
             button(if (night) "오늘 일기 보기 ›" else "전날 일기 보기 ›", 59, 224, 239, 35, paper) {
                 openDiary(recent, "home")
@@ -343,7 +345,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
 
         panel(348, 96, 328, 83)
         art("tail", 499.2, 178.8, 25.6, 15.2)
-        label(message.ifBlank { if (night) "오늘은 어떤 하루였나요?" else "어떤 마음으로\n출발할까요?" },
+        label(message.ifBlank { if (night) "오늘은 어떤 하루였나요?" else if (awaitingMorningGoal()) "오늘 이루고 싶은\n목표는 무엇인가요?" else "목표를 정했어요.\n지금의 마음을 들려주세요." },
             365, 100, 294, 74, 21f, bold = true, center = true)
         art(if (todayFlower != null) characterArt(todayFlower) else "sprout",
             409.6, 181.6, 204.8, 177, if (todayFlower == null) "씨앗" else todayFlower.flower)
@@ -355,7 +357,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             character.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(850).start()
         }
         animateBloom = false
-        val latestSaved = records.firstOrNull { it.id == latestSavedId }
+        val latestSaved = records.firstOrNull { it.id == latestSavedId }.takeUnless { awaitingMorningGoal() }
         when (speechPhase) {
             SpeechPhase.RECORDING -> {
                 panel(348, 356, 328, 72, "#fff6ec")
@@ -391,6 +393,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     art("mic", 506, 392, 12, 18)
                     val caption = when {
                         pendingGoalText != null || voiceDraft != null -> "다시 저장"
+                        awaitingMorningGoal() -> "목표 답하기"
                         else -> "일기 녹음"
                     }
                     panel(452, 431, 120, 24, "#fff5ea")
@@ -398,6 +401,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     hit(caption, 451, 373, 122, 82) { handleVoiceControl() }
                 }
             }
+        }
+
+        if (awaitingMorningGoal() && speechPhase == null && pendingGoalText == null) {
+            button("글로 목표 답하기", 372, 451, 280, 20, paper) { editGoalAnswer() }
         }
 
         if (night) {
@@ -417,7 +424,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             }
         } else {
             label("오늘의 목표", 727, 105, 225, 29, 14f, "#536548", true)
-            tasks().take(3).forEachIndexed { i, task ->
+            if (awaitingMorningGoal()) label("첫 질문에 답하면\n오늘의 목표로 저장돼요.", 727, 139, 238, 88, 17f, center = true)
+            else tasks().take(3).forEachIndexed { i, task ->
                 button((if (task in db.checked()) "✓ " else "□ ") + task, 727, 139 + i * 33, 238, 32, paper) {
                     if (db.toggle(task)) host.render() else msg("목표를 저장하지 못했어요.")
                 }
@@ -461,7 +469,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         pendingGoalText?.let { saveGoalTranscript(it); return }
         voiceDraft?.let { saveVoiceDiary(it); return }
         if (microphonePermissionPending || speechPhase != null) return
-        recordingGoal = forGoal
+        recordingGoal = forGoal || awaitingMorningGoal()
         if (host.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             microphonePermissionPending = true
             host.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 42)
@@ -474,7 +482,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         microphonePermissionPending = false
         if (!host.isJournalVisible || page != "home") return
         if (granted) startSpeech()
-        else if (recordingGoal) msg("목표를 말하려면 마이크 권한을 허용해 주세요.")
+        else if (recordingGoal) editGoalAnswer()
         else editDiary(null, "마이크 권한 없이 글로 기록할 수 있어요.")
     }
 
@@ -507,7 +515,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     if (!host.isJournalVisible || page != "home") msg(message)
                     host.render()
                 } else if (forGoal) {
-                    saveGoalTranscript(text)
+                    saveGoalTranscript(text, recordedAt.toLocalDate())
                 } else {
                     saveVoiceDiary(VoiceDraft(text, moment, recordedAt))
                 }
@@ -521,11 +529,31 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
-    private fun saveGoalTranscript(text: String) {
-        val saved = db.saveSpokenGoal(text)
+    private fun editGoalAnswer() {
+        val input = EditText(host).apply {
+            hint = "예: 오늘은 퇴근 후 20분 산책하고 싶어요"
+            contentDescription = "첫 질문의 목표 답변"
+            maxLines = 4
+            filters = arrayOf(InputFilter.LengthFilter(1200))
+        }
+        val dialog = AlertDialog.Builder(host).setTitle("오늘 이루고 싶은 목표는 무엇인가요?")
+            .setView(input).setNegativeButton("취소", null).setPositiveButton("목표로 저장", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val answer = input.text.toString().trim()
+                if (answer.isBlank()) { input.error = "목표를 입력해 주세요."; return@setOnClickListener }
+                dialog.dismiss()
+                saveGoalTranscript(answer)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun saveGoalTranscript(text: String, date: LocalDate = today) {
+        val saved = db.saveSpokenGoal(text, date)
         pendingGoalText = if (saved) null else text
         latestSavedId = null
-        message = if (saved) "오늘의 목표를 정했어요." else "목표를 저장하지 못했어요. 다시 저장해 주세요."
+        message = if (saved) "오늘의 목표를 정했어요.\n이제 하루의 이야기를 들려주세요." else "목표를 저장하지 못했어요. 다시 저장해 주세요."
         if (!host.isJournalVisible || page != "home") msg(message)
         host.render()
     }
@@ -820,6 +848,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             61, 323, 228, 34, 16f, bold = true, center = true)
         label(if (detailTab == 0) "${dayEntries.size}개의 기록을 모았어요" else selected?.moment.orEmpty(),
             61, 362, 228, 28, 14f, muted, center = true)
+
+        val classifiedText = if (detailTab == 0) dayEntries.joinToString(" ") { it.body } else selected?.body.orEmpty()
+        label(if (Mood.scores(classifiedText).isEmpty()) "일치 없음 · 평온으로 임시 표시" else "키워드 기반 임시 분류",
+            61, 394, 228, 19, 11f, muted, center = true)
 
         listOf("요약 일기", "시간별 기록", "음성 기록").forEachIndexed { i, value ->
             button(value, 344 + i * 148, 81, 136, 42, if (detailTab == i) green else paper,
