@@ -46,7 +46,7 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
 |---|---|
 | 내 정보 | 호칭 3종, 기록할 순간 3종, 선택 연령대·성별 |
 | 첫 목표 | 일기 말하기 / 숨 고르기 / 고마운 순간 |
-| 실시간 요약 | 오른쪽 카드에 선택 즉시 반영 |
+| 실시간 요약 | 하단 요약에 선택 즉시 반영 |
 | 로컬 저장 | 동의 후 저장, 재실행 복원 |
 | 선택 해제 | 연령대 재선택으로 해제, 성별 선택 안 함 |
 | 씨앗 | Figma 원본 이미지 사용, 날짜별 심기 상태 저장 |
@@ -64,7 +64,7 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
 | 행 | 범위 | 상태 |
 |---|---|---|
-| 01 | 정보 입력 → 씨앗 → 날씨 선택 | 코드 작성, 검증 상태 아래 참고 |
+| 01 | 정보 입력 → 씨앗 → 날씨 선택 | 구현 · APK 빌드 · Android 기능 테스트 통과 |
 | 02 | 아침 홈 · 날씨 4종 | 미구현 |
 | 03 | 목표 설정 · 아침 대화 · 목표 완료 | 미구현 |
 | 04 | 주행 · 음성 반응 · 바람 반응 | 미구현 |
@@ -84,13 +84,22 @@ AI, STT/TTS, Vehicle/FusedLocation/NaviHelper, 일기 CRUD·통계는 후속 단
 ![씨앗 심기](docs/figma-392-183.png)
 ![날씨 선택](docs/figma-433-186.png)
 
+### 실제 Android 실행 화면 (API 34, 1024×552)
+
+![실행: 정보 입력](docs/screenshots/01-profile.png)
+![실행: 씨앗](docs/screenshots/02-seed.png)
+![실행: 날씨](docs/screenshots/03-weather.png)
+
 ## 검증
 
 - `./gradlew assembleDebug lintDebug`: 빌드·정적 검사.
 - `./gradlew connectedDebugAndroidTest`: 기기/에뮬레이터에서 복원, 해제, 저장/삭제, 씨앗→날씨 흐름 검사.
-- GitHub Actions에서 APK와 테스트 보고서를 생성하도록 구성했습니다.
-- **로컬 Java 네트워크 제약으로 Gradle 다운로드가 실패했습니다.** 실제 성공 여부는 Actions 결과와 후속 기록 참고.
-- **Pleos 에뮬레이터 실행 및 시각 일치 검증은 아직 완료하지 않았습니다.**
+- GitHub Actions **전체 성공**. APK·테스트 보고서·실행 캡처 생성 확인.
+- lintDebug 오류 0개, 경고 7개(대상 API, 의존성 업데이트 안내, 시스템 UI API, 백업 규칙 및 앱 아이콘 관련).
+- 로컬에서는 Java 네트워크 제약이 있었으나, GitHub Actions에서 **APK 빌드 및 lintDebug 검사가 통과**했습니다.
+- [검증 실행 기록](https://github.com/BBIYACK-0834/Hyundai_Sai/actions/runs/43589657773)의 `sai-row01-debug-apk`에서 APK를 받을 수 있습니다.
+- Android 14(API 34) 에뮬레이터 계측 테스트 **5개 통과**: 선택 복원, 선택 해제, 저장/삭제, 씨앗→날씨 전환, 3화면 캡처.
+- **Pleos 전용 에뮬레이터·실차 검증은 아직 완료하지 않았습니다.**
 
 ## 구조
 

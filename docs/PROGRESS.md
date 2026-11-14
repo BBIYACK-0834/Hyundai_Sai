@@ -1,6 +1,7 @@
 # 구현 체크포인트 · 2026-11-14
 
-01행 코드 작성. 빌드/실행 결과는 README 및 Actions 참고.
+01행 구현, APK 빌드 및 lintDebug 통과. Android API 34 계측 테스트 5개 통과.
+Pleos 전용 SDK/에뮬레이터는 미검증. 실행 결과는 README 및 Actions 참고.
 전체 앱 완료가 아니며 날씨 선택은 아직 홈을 열지 않는다.
 
 ## Figma 위치
@@ -18,7 +19,7 @@
 - 10행: 591:1472
 
 ## 다음 작업
-1. 빌드·계측 테스트 결과 확인, 01행 실행 캡처 대조.
+1. 완료: 빌드·계측 테스트 5개 통과, 01행 실행 캡처 확인.
 2. 02행 4화면 get_design_context + 스크린샷 확인, 원본 에셋 다운로드.
 3. 날씨 선택→홈 연결. 시연 날씨와 실제 날씨 구분.
 4. 음성 녹음은 홈 내부 상태로 표시하고 권한/종료/저장 오류 처리.
@@ -33,3 +34,9 @@
 - 재생성 시 미저장 선택은 Bundle 복원.
 - 프로필은 SharedPreferences, 일기는 별도 DB로 구현 예정.
 - 기획 ZIP의 과거 의견보다 최신 신청서 핵심 기능·Figma 우선.
+
+## 검증 완료
+- Actions: https://github.com/BBIYACK-0834/Hyundai_Sai/actions/runs/43589657773
+- APK 빌드, lintDebug, API 34 테스트 5개 성공.
+- docs/screenshots/에 실제 실행 3화면 보관.
+- 다음 구현 시작점은 02행. Pleos 전용 SDK 및 실차 검증은 미완료.
