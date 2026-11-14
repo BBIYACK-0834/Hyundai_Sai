@@ -25,6 +25,25 @@ class ProfileFlowTest {
     private fun click(activity: MainActivity, text: String) {
         descendants(activity.window.decorView).filterIsInstance<Button>().single { it.text.toString() == text }.performClick()
     }
+    private fun capture(name: String) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.waitForIdleSync()
+        val bitmap = instrumentation.uiAutomation.takeScreenshot()
+        assertNotNull(bitmap)
+        val directory = java.io.File(context.externalCacheDir, "screenshots").apply { mkdirs() }
+        java.io.File(directory, "$name.png").outputStream().use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+    @Test fun captureFirstRow() {
+        ActivityScenario.launch(MainActivity::class.java).use { capture("01-profile") }
+        ProfileStore(context).save(Profile())
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            capture("02-seed")
+            scenario.onActivity { click(it, "씨앗 심기") }
+            capture("03-weather")
+        }
+    }
     @Test fun selectedProfileSurvivesRecreation() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { a -> click(a, "정원사"); click(a, "도착했을 때"); click(a, "30대"); click(a, "한 번 깊게 숨 고르기") }
