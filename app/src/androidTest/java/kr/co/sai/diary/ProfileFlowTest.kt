@@ -262,6 +262,11 @@ class ProfileFlowTest {
             scenario.onActivity { a ->
                 descendants(a.window.decorView).filterIsInstance<Button>()
                     .single { it.contentDescription == "기록" }.performClick()
+                // Three recordings on November 13 are one daily diary.
+                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == "1편" })
+                assertFalse(descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == "3편" })
                 click(a, "시연 일기")
                 fun shows(text: String) = descendants(a.window.decorView).filterIsInstance<TextView>()
                     .any { it.text.toString().contains(text) }
