@@ -754,7 +754,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun selectDay(entries: List<Diary>, returnTo: String) {
-        if (entries.size == 1) openDiary(entries.first(), returnTo)
+        if (entries.all { it.date == entries.first().date }) openDiary(entries.first(), returnTo)
         else AlertDialog.Builder(host).setTitle("일기 선택")
             .setItems(entries.map { "${it.time.format(DateTimeFormatter.ofPattern("HH:mm"))}  ${it.moment} · ${it.summary}" }.toTypedArray()) { _, i ->
                 openDiary(entries[i], returnTo)
@@ -778,59 +778,34 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             openMonth(YearMonth.from(entry.date), (entry.date.dayOfMonth - 1) / 6)
         }
         val dayEntries = records.filter { it.date == entry.date }.sortedBy { it.time }
-        val selected = dayEntries.firstOrNull { it.id == detailTimeId } ?: entry
-        panel(47, 137, 344, 279, "#f0e9d9")
-        panel(398, 137, 582, 279)
-        label(entry.date.format(shortDate), 67, 154, 304, 40, 23f, bold = true)
-        val mood = selected.mood
-        art(characterArt(mood), 77, 192, 150, 128)
-        label(selected.flower?.let { "${mood.title} · ${it.flower}" } ?: mood.title,
-            230, 220, 148, 55, 17f, bold = true)
-        label("하루 속 감정 변화", 65, 308, 295, 23, 15f, bold = true)
-        val moodTrack = object : View(host) {
-            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val choices = if (detailTab == 2) dayEntries.filter { it.voice } else dayEntries
+        val selected = choices.firstOrNull { it.id == detailTimeId } ?: choices.lastOrNull()
+        val hasTimePicker = detailTab != 0 && choices.isNotEmpty()
 
-            override fun onDraw(canvas: Canvas) {
-                val step = width.toFloat() / dayEntries.size
-                val y = height / 2f
-                paint.color = Color.parseColor("#d8cabb")
-                paint.strokeWidth = 2f
-                canvas.drawLine(step / 2f, y, width - step / 2f, y, paint)
-                dayEntries.forEachIndexed { index, item ->
-                    paint.color = Color.parseColor(item.mood.color)
-                    canvas.drawCircle(step * (index + 0.5f), y, if (item.id == selected.id) 7f else 5f, paint)
-                }
-            }
-        }
-        host.surface.place(moodTrack, 65, 333, 305, 17)
-        val timeline = android.widget.HorizontalScrollView(host).apply {
-            isHorizontalScrollBarEnabled = false
-            addView(android.widget.LinearLayout(host).apply {
-                for (item in dayEntries) {
-                    addView(Button(host).apply {
-                        text = item.time.format(clockFormat)
-                        contentDescription = "${text} · ${item.mood.title} 기록"
-                        isSelected = item.id == selected.id
-                        setOnClickListener {
-                            detailTimeId = item.id
-                            detailTab = 1
-                            host.render()
-                        }
-                    })
-                }
-            })
-        }
-        host.surface.place(timeline, 65, 352, 305, 48)
+        panel(47, 137, 257, 279, "#f0e9d9")
+        panel(316, 137, 664, 279)
+        label(entry.date.format(shortDate), 62, 154, 227, 40, 22f, bold = true, center = true)
+        val topMood = if (detailTab == 0) distribution(dayEntries).firstOrNull()?.first ?: entry.mood
+            else selected?.mood ?: entry.mood
+        art(characterArt(topMood), 100, 198, 151, 121, topMood.flower)
+        label(if (detailTab == 0) "하루 대표 감정 · ${topMood.title}" else "감정 · ${topMood.title}",
+            61, 323, 228, 34, 16f, bold = true, center = true)
+        label(if (detailTab == 0) "${dayEntries.size}개의 기록을 모았어요" else selected?.flower?.flower.orEmpty(),
+            61, 362, 228, 28, 14f, muted, center = true)
+
         listOf("요약 일기", "시간별 기록", "음성 기록").forEachIndexed { i, value ->
-            button(value, 477 + i * 104, 85, 97, 35, if (detailTab == i) green else paper) {
+            button(value, 344 + i * 148, 81, 136, 42, if (detailTab == i) green else paper,
+                selected = detailTab == i) {
                 detailTab = i
                 host.render()
             }
         }
+        if (hasTimePicker) timePicker(choices, selected)
+
         val content = when (detailTab) {
-            0 -> entry.body
-            1 -> "${selected.time.format(clockFormat)}  ${selected.moment}\n${selected.body}"
-            else -> if (entry.voice) entry.body else "음성으로 작성한 기록이 없어요."
+            0 -> summarizeDay(dayEntries)
+            1 -> selected?.body.orEmpty()
+            else -> selected?.body ?: "음성으로 작성한 기록이 없어요."
         }
         val body = android.widget.TextView(host).apply {
             text = content
@@ -838,21 +813,81 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             setTextColor(Color.parseColor(brown))
             setLineSpacing(5f, 1f)
         }
-        host.surface.place(ScrollView(host).apply { addView(body) }, 421, 163, 536, 192)
-        button("수정", 421, 367, 92, 39) { editDiary(entry) }
-        if (entry.moment == "도착") button("꽃 선택", 524, 367, 123, 39) { chooseFlower(entry) }
-        button("삭제", 854, 367, 103, 39, "#f1dfd9") {
-            AlertDialog.Builder(host).setTitle("이 일기를 삭제할까요?")
-                .setNegativeButton("취소", null).setPositiveButton("삭제") { _, _ ->
-                    if (db.delete(entry.id)) go(detailBack) else msg("일기를 삭제하지 못했어요.")
-                }.show()
+        val bodyTop = if (hasTimePicker) 241 else 159
+        val editing = selected?.takeIf { detailTab != 0 }
+        val bodyBottom = if (editing == null) 398 else 360
+        host.surface.place(ScrollView(host).apply { addView(body) }, 339, bodyTop, 617, bodyBottom - bodyTop)
+        if (editing != null) {
+            button("수정", 339, 367, 100, 39) { editDiary(editing) }
+            if (editing.moment == "도착") button("꽃 선택", 449, 367, 123, 39) { chooseFlower(editing) }
+            button("삭제", 854, 367, 103, 39, "#f1dfd9") {
+                AlertDialog.Builder(host).setTitle("이 시간대의 일기를 삭제할까요?")
+                    .setNegativeButton("취소", null).setPositiveButton("삭제") { _, _ ->
+                        if (db.delete(editing.id)) {
+                            val remaining = dayEntries.lastOrNull { it.id != editing.id }
+                            if (remaining == null) go(detailBack) else openDiary(remaining, detailBack)
+                        } else msg("일기를 삭제하지 못했어요.")
+                    }.show()
+            }
         }
-        val index = records.indexOf(entry)
-        records.getOrNull(index + 1)?.let { older ->
+        records.firstOrNull { it.date < entry.date }?.let { older ->
             button("‹ 이전 일기", 45, 421, 150, 34) { openDiary(older, detailBack) }
         }
-        records.getOrNull(index - 1)?.let { newer ->
+        records.lastOrNull { it.date > entry.date }?.let { newer ->
             button("다음 일기 ›", 830, 421, 150, 34) { openDiary(newer, detailBack) }
+        }
+    }
+
+    private fun timePicker(choices: List<Diary>, selected: Diary?) {
+        label("시간대 선택", 339, 149, 220, 27, 15f, bold = true)
+        if (choices.size > 4) label("좌우로 밀어 더 보기", 762, 149, 196, 27, 13f, muted)
+        val row = android.widget.LinearLayout(host)
+        var selectedButton: Button? = null
+        for (item in choices) {
+            val active = item.id == selected?.id
+            val chip = Button(host).apply {
+                val timeText = item.time.format(clockFormat)
+                text = "$timeText · ${item.mood.title}"
+                contentDescription = "$timeText · ${item.mood.title} 기록"
+                isSelected = active
+                isAllCaps = false
+                minWidth = 0
+                minimumWidth = 0
+                minHeight = 0
+                minimumHeight = 0
+                setPadding(0, 0, 0, 0)
+                textSize = 15f
+                setTextColor(Color.parseColor(if (active) paper else brown))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 10 * host.resources.displayMetrics.density
+                    setColor(Color.parseColor(if (active) "#536548" else green))
+                }
+                setOnClickListener {
+                    detailTimeId = item.id
+                    host.render()
+                }
+            }
+            row.addView(chip, android.widget.LinearLayout.LayoutParams(136, -1))
+            if (active) selectedButton = chip
+        }
+        val scroll = object : android.widget.HorizontalScrollView(host) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val scale = MeasureSpec.getSize(widthMeasureSpec) / 617f
+                for (i in 0 until row.childCount) {
+                    val chip = row.getChildAt(i) as Button
+                    val layout = chip.layoutParams as android.widget.LinearLayout.LayoutParams
+                    layout.width = (142 * scale).toInt()
+                    layout.marginEnd = (9 * scale).toInt()
+                    chip.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 16 * scale)
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }.apply { addView(row) }
+        host.surface.place(scroll, 339, 181, 617, 48)
+        scroll.post {
+            selectedButton?.let { chip ->
+                if (chip.right > scroll.width) scroll.scrollTo(chip.right - scroll.width, 0)
+            }
         }
     }
 

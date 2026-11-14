@@ -41,6 +41,24 @@ internal data class Diary(
     val mood get() = flower ?: emotion
 }
 
+
+internal fun summarizeDay(records: List<Diary>): String {
+    val sentenceBreak = Regex("(?<=[.!?。！？])\\s+|[\\r\\n]+")
+    val whitespace = Regex("\\s+")
+    val seen = mutableSetOf<String>()
+    return records.sortedBy { it.time }.mapNotNull { entry ->
+        val sentences = entry.body.trim().split(sentenceBreak)
+            .map { it.trim().replace(whitespace, " ") }.filter { it.isNotEmpty() }
+        val emotionSentence = sentences.indexOfFirst { Mood.scores(it).isNotEmpty() }
+        val excerpt = sentences.filterIndexed { index, _ ->
+            index == 0 || index == emotionSentence
+        }.filter { seen.add(it) }.joinToString(" ") { sentence ->
+            if (sentence.length > 140) sentence.take(139).trimEnd() + "…" else sentence
+        }
+        excerpt.takeIf { it.isNotEmpty() }
+    }.joinToString("\n\n")
+}
+
 internal class JournalStore(context: Context) {
     private val prefs = context.getSharedPreferences("sai_journal", Context.MODE_PRIVATE)
 

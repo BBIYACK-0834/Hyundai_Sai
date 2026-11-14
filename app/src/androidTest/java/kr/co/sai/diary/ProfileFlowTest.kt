@@ -183,4 +183,36 @@ class ProfileFlowTest {
         }
     }
 
+
+    @Test fun daySummaryUsesAllTimesAndTimePickerOpensFullEntry() {
+        ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
+        val db = JournalStore(context)
+        val now = LocalDateTime.now()
+        val evening = checkNotNull(db.add("저녁에 산책했어요. 노을을 보니 행복했어요. 집 앞에서 신발을 털었어요.",
+            "도착", true, now.withHour(18).withMinute(40)))
+        val morning = checkNotNull(db.add("아침에 발표했어요. 시작할 때는 긴장했어요. 커피도 샀어요.",
+            "출발", true, now.withHour(8).withMinute(30)))
+        val summary = "아침에 발표했어요. 시작할 때는 긴장했어요.\n\n저녁에 산책했어요. 노을을 보니 행복했어요."
+        assertEquals(summary, summarizeDay(listOf(evening, morning)))
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "기록" }.performClick()
+                click(activity, "오늘 일기")
+                fun shows(text: String) = descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == text }
+                assertTrue(shows(summary))
+                click(activity, "시간별 기록")
+                assertTrue(shows("시간대 선택"))
+                click(activity, "08:30 · 걱정")
+                assertTrue(shows(morning.body))
+                click(activity, "18:40 · 기쁨")
+                assertTrue(shows(evening.body))
+                click(activity, "요약 일기")
+                assertTrue(shows(summary))
+            }
+        }
+    }
+
 }
