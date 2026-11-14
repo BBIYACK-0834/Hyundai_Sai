@@ -106,9 +106,9 @@ class ProfileFlowTest {
             scenario.onActivity { activity ->
                 click(activity, "씨앗 심기")
                 assertEquals("낮 맑음", ProfileStore(context).weather())
-                assertEquals("시연 예시", db.entries().single().moment)
+                assertTrue(db.entries().all { it.isDemo })
                 assertTrue(db.seedYesterday())
-                assertEquals(1, db.entries().size)
+                assertEquals(3, db.entries().size)
                 assertTrue(db.saveSpokenGoal("오늘은 퇴근 후에 산책하고 싶어요."))
                 assertEquals(listOf("오늘 10분 몸 움직이기"), db.tasks(""))
                 val entry = checkNotNull(db.add("오늘 기쁘고 즐거운 일이 있었어요.", "출발", true))
@@ -121,13 +121,13 @@ class ProfileFlowTest {
                     .any { it.text.toString() == "꽃말   새로운 시작" })
                 descendants(activity.window.decorView).filterIsInstance<Button>()
                     .single { it.contentDescription == "기록" }.performClick()
-                click(activity, "어제 일기")
+                click(activity, "시연 일기")
                 assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
                     .any { it.text.toString().contains("퇴근길에 노을") })
             }
             scenario.recreate()
             assertEquals("밤 맑음", ProfileStore(context).weather())
-            assertEquals(2, db.entries().size)
+            assertEquals(4, db.entries().size)
         }
     }
     @Test fun voiceEntryKeepsRecordingDateAndAppearsInRecordsAfterRestart() {
@@ -212,6 +212,110 @@ class ProfileFlowTest {
                 click(activity, "요약 일기")
                 assertTrue(shows(summary))
             }
+        }
+    }
+
+
+    @Test fun sampleUpgradePreservesEditedDiaryAndDoesNotDuplicateOrRestoreDeletedSamples() {
+        val db = JournalStore(context)
+        val date = java.time.LocalDate.of(2026, 11, 13)
+        val edited = checkNotNull(db.add("내가 직접 수정한 예시 본문", "시연 예시", false,
+            date.atTime(18, 40), "demo-yesterday", tags = listOf("내기록")))
+        context.getSharedPreferences("sai_journal", Context.MODE_PRIVATE).edit()
+            .putBoolean("demo_yesterday_seeded", true).commit()
+        assertTrue(db.upgradeExistingDemo())
+        assertEquals(edited, db.entries().single { it.id == edited.id })
+        assertEquals(3, db.entries().size)
+        assertTrue(db.seedYesterday())
+        assertEquals(3, db.entries().size)
+        assertTrue(db.delete("demo-nov13-morning"))
+        assertTrue(db.upgradeExistingDemo())
+        assertEquals(2, db.entries().size)
+        assertTrue(db.clear())
+        context.getSharedPreferences("sai_journal", Context.MODE_PRIVATE).edit()
+            .putBoolean("demo_yesterday_seeded", true).commit()
+        assertTrue(db.upgradeExistingDemo())
+        assertTrue(db.entries().isEmpty())
+    }
+
+    @Test fun oldDiaryLoadsWithoutTagsAndExplicitEmptyTagsPersist() {
+        val prefs = context.getSharedPreferences("sai_journal", Context.MODE_PRIVATE)
+        prefs.edit().putString("entries", """[{"id":"legacy","date":"2026-11-13",
+            "time":"18:40","body":"퇴근길 노을을 보았어요","moment":"도착","voice":false}]""").commit()
+        val db = JournalStore(context)
+        val old = db.entries().single()
+        assertEquals(listOf("퇴근", "노을"), old.tags)
+        assertTrue(db.replace(old.copy(tags = emptyList())))
+        assertTrue(JournalStore(context).entries().single().tags.isEmpty())
+        assertEquals(listOf("퇴근", "노을", "휴식"), normalizeDiaryTags("#퇴근, 노을 #퇴근 휴식"))
+    }
+
+    @Test fun sampleDayShowsThreeTimesTwoVoiceExamplesAndEditableTags() {
+        ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
+        val db = JournalStore(context)
+        assertTrue(db.seedYesterday())
+        val samples = db.entries().filter { it.isDemo }
+        assertEquals(3, samples.size)
+        assertTrue(samples.all { it.date == java.time.LocalDate.of(2026, 11, 13) })
+        assertEquals(2, samples.count { it.voice })
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { a ->
+                descendants(a.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "기록" }.performClick()
+                click(a, "시연 일기")
+                fun shows(text: String) = descendants(a.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString().contains(text) }
+                assertTrue(shows("3개의 기록"))
+                click(a, "시간별 기록")
+                click(a, "08:30 · 걱정")
+                assertTrue(shows("오전 회의"))
+                assertTrue(shows("#출근"))
+                click(a, "12:40 · 평온")
+                assertTrue(shows("주말 계획"))
+                click(a, "음성 기록")
+                assertFalse(descendants(a.window.decorView).filterIsInstance<Button>()
+                    .any { it.text.toString().startsWith("12:40") })
+                click(a, "18:40 · 평온")
+                assertTrue(shows("실제 녹음 없음"))
+                assertTrue(shows("퇴근길에 노을"))
+                click(a, "수정")
+            }
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+            fun findTag(node: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
+                if (node.contentDescription?.toString() == "일기 태그") return node
+                for (index in 0 until node.childCount) {
+                    node.getChild(index)?.let { child -> findTag(child)?.let { return it } }
+                }
+                return null
+            }
+            val tags = checkNotNull(findTag(automation.rootInActiveWindow))
+            val args = android.os.Bundle().apply {
+                putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                    "#퇴근, #나만의시간")
+            }
+            assertTrue(tags.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args))
+            automation.rootInActiveWindow.findAccessibilityNodeInfosByText("저장")
+                .first { it.isClickable }.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            assertEquals(listOf("퇴근", "나만의시간"), JournalStore(context).entries()
+                .single { it.id == "demo-yesterday" }.tags)
+        }
+    }
+    @Test fun captureDemoDetailTabs() {
+        ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
+        assertTrue(JournalStore(context).seedYesterday())
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { a ->
+                descendants(a.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "기록" }.performClick()
+                click(a, "시연 일기")
+            }
+            capture("04-demo-summary")
+            scenario.onActivity { click(it, "시간별 기록"); click(it, "12:40 · 평온") }
+            capture("05-demo-times")
+            scenario.onActivity { click(it, "음성 기록"); click(it, "18:40 · 평온") }
+            capture("06-demo-voice")
         }
     }
 
