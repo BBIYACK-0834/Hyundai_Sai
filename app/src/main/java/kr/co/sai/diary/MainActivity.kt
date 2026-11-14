@@ -8,7 +8,11 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.text.InputFilter
+import android.text.InputType
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -19,6 +23,7 @@ class MainActivity : Activity() {
     internal var profile = Profile()
     internal lateinit var journal: JournalScreens
     private var screen = "profile"
+    private var profileInputs: List<EditText> = emptyList()
     private val brown = "#4b372f"
     private val green = "#e9efdf"
     private val rose = "#9c625b"
@@ -29,7 +34,7 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         store = ProfileStore(this)
         journal = JournalScreens(this, savedInstanceState)
-        profile = store.load()
+        profile = if (store.hasProfile()) store.load() else Profile(nickname = "")
         if (savedInstanceState != null) {
             profile = Profile(savedInstanceState.getString("nickname", profile.nickname),
                 savedInstanceState.getString("moment", profile.moment),
@@ -49,8 +54,10 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(out)
         journal.saveState(out)
         out.putString("screen", screen)
-        out.putString("nickname", profile.nickname); out.putString("moment", profile.moment)
-        out.putString("age", profile.age); out.putString("gender", profile.gender)
+        out.putString("nickname", profileInputs.getOrNull(0)?.text?.toString() ?: profile.nickname)
+        out.putString("moment", profile.moment)
+        out.putString("age", profileInputs.getOrNull(1)?.text?.toString() ?: profile.age)
+        out.putString("gender", profileInputs.getOrNull(2)?.text?.toString() ?: profile.gender)
         out.putString("goal", profile.goal)
     }
 
@@ -96,6 +103,7 @@ class MainActivity : Activity() {
     }
 
     internal fun render() {
+        profileInputs = emptyList()
         surface = DesignSurface(this)
         surface.setBackgroundColor(Color.parseColor(if (screen == "weather") "#fcf6ed" else "#fff9f0"))
         setContentView(surface)
@@ -108,61 +116,76 @@ class MainActivity : Activity() {
     }
 
     private fun profileScreen() {
-        panel(38.4, 88.4, 277.6, 366, green)
-        label("사이", 38.4, 110.4, 277.6, 43.2, 28f, "#536548", true).gravity = Gravity.CENTER
-        panel(55.6, 172.4, 243.2, 66, "#fffefa")
-        label("반가워요.\n오늘의 마음을 들려주세요.", 63.6, 177.2, 227.2, 56.4, 17.6f, "#536548").gravity = Gravity.CENTER
-        val sprout = ImageView(this).apply {
-            setImageDrawable(android.graphics.drawable.PictureDrawable(com.caverock.androidsvg.SVG.getFromAsset(assets, "sprout.svg").renderToPicture()))
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "기록을 기다리는 새싹"
-        }
-        surface.place(sprout, 76.76, 255.2, 200.88, 187.92)
-        label("내 정보와 첫 목표", 344.8, 56, 472, 40.4, 29.6f, bold = true)
-        label("호칭, 연령대, 성별을 고르고 첫 목표를 정해요.", 347.2, 98.4, 600, 26.4, 17.6f, "#826e62")
-        panel(344.8, 136, 640.8, 239.6, "#fffefa")
-        val rows = listOf(
-            Triple("호칭", listOf("친구", "정원사", "운전자"), profile.nickname),
-            Triple("기록하고 싶은 순간", listOf("출발할 때", "도착했을 때", "하루의 시작과 끝"), profile.moment),
-            Triple("연령대 · 선택", listOf("10대", "20대", "30대", "40대 이상"), profile.age),
-            Triple("성별 · 선택", listOf("여성", "남성", "선택 안 함"), profile.gender),
-            Triple("첫 목표를 골라주세요", listOf("하루 끝에 일기 말하기", "한 번 깊게 숨 고르기", "고마운 순간 떠올리기"), profile.goal)
-        )
-        rows.forEachIndexed { row, (title, values, current) ->
-            val y = 147.6 + row * 43.2
-            label(title, 361.6, y, 142, 34, 14f)
-            val width = if (row == 2) 107.6 else 146.8
-            values.forEachIndexed { i, value ->
-                button(value, 512.8 + i * (width + 6.4), y, width, 33.6,
-                    if (row == 4) 13.2f else 15.2f,
-                    if (row == 4) "#f2e3de" else green,
-                    if (row == 4) rose else "#58674b", current == value) {
-                    profile = when (row) {
-                        0 -> profile.copy(nickname = value)
-                        1 -> profile.copy(moment = value)
-                        2 -> profile.copy(age = if (profile.age == value) "선택 안 함" else value)
-                        3 -> profile.copy(gender = value)
-                        else -> profile.copy(goal = value)
-                    }; render()
-                }
+        surface.isFocusableInTouchMode = true
+        surface.requestFocus()
+        panel(220.8, 52.4, 582.4, 439.2, "#e8dccd")
+        panel(221.6, 53.2, 580.8, 437.6, "#fffefa")
+        label("내 정보 입력", 254.4, 76.8, 513.6, 43.2, 27.6f, bold = true)
+        label("사이에서 사용할 내 정보를 입력해 주세요.", 255.2, 126, 507.2, 24.8, 16f, "#756258")
+        label("호칭", 254.4, 169.6, 513.6, 27.2, 16.8f)
+        label("나이", 254.4, 259.2, 160, 27.2, 16.8f)
+        label("성별 (선택)", 433.6, 259.2, 334.4, 27.2, 16.8f)
+
+        val nickname = profileInput("호칭", "불리고 싶은 이름을 입력해 주세요", profile.nickname,
+            254.4, 203.2, 513.6, 40, InputType.TYPE_CLASS_TEXT)
+        // Earlier versions stored age ranges. Keep the stored value if this field is left empty.
+        val age = profileInput("나이", "예: 25", profile.age.takeIf { it.toIntOrNull() != null }.orEmpty(),
+            254.4, 292.8, 160.0, 3, InputType.TYPE_CLASS_NUMBER)
+        val gender = profileInput("성별 (선택)", "직접 입력해 주세요", profile.gender.takeUnless { it == "선택 안 함" }.orEmpty(),
+            433.6, 292.8, 334.4, 40, InputType.TYPE_CLASS_TEXT)
+        profileInputs = listOf(nickname, age, gender)
+        button("다음", 254.4, 404.4, 513.6, 44.4, bg = rose, fg = "#ffffff") {
+            val name = nickname.text.toString().trim()
+            val ageText = age.text.toString().trim()
+            if (name.isEmpty()) {
+                nickname.error = "불리고 싶은 이름을 입력해 주세요."
+                nickname.requestFocus()
+                return@button
             }
-        }
-        panel(344.8, 383.6, 640.8, 36.8, "#f3eddf")
-        listOf(Triple("호칭", profile.nickname, 356f), Triple("연령대", profile.age, 440.8f),
-            Triple("성별", profile.gender, 540.8f), Triple("첫 목표", profile.goal, 634.8f)).forEach { (title, value, x) ->
-            val width = if (title == "첫 목표") 320 else 84
-            label(title, x, 384.8, width, 15.6, 10.4f, "#756258")
-            label(value, x, 398.8, width, 19.2, 13.2f)
-        }
-        button("저장하고 씨앗 심기  ›", 680, 430, 305.6, 40.8, bg = rose, fg = "#ffffff") {
+            if (ageText.isNotEmpty() && ageText.toIntOrNull()?.let { it in 1..130 } != true) {
+                age.error = "1세부터 130세까지 입력해 주세요."
+                age.requestFocus()
+                return@button
+            }
+            val updated = profile.copy(
+                nickname = name,
+                age = ageText.ifEmpty { profile.age.takeIf { it.endsWith("대") || it.endsWith("이상") } ?: "선택 안 함" },
+                gender = gender.text.toString().trim().ifEmpty { "선택 안 함" }
+            )
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(nickname.windowToken, 0)
             AlertDialog.Builder(this).setTitle("이 기기에 저장할까요?")
-                .setMessage("선택한 정보와 첫 목표를 이 기기에 저장해요. 외부로 전송하지 않으며, 정보 관리에서 모두 삭제할 수 있어요.")
+                .setMessage("입력한 정보를 이 기기에 저장해요. 정보 관리에서 삭제할 수 있어요.")
                 .setNegativeButton("취소", null).setPositiveButton("동의하고 저장") { _, _ ->
-                    if (store.save(profile)) { screen = "seed"; render() }
-                    else Toast.makeText(this, "저장하지 못했어요. 다시 시도해 주세요.", Toast.LENGTH_LONG).show()
+                    if (store.save(updated)) {
+                        profile = updated
+                        screen = "seed"
+                        render()
+                    } else Toast.makeText(this, "저장하지 못했어요. 다시 시도해 주세요.", Toast.LENGTH_LONG).show()
                 }.show()
         }
+    }
+
+    private fun profileInput(name: String, hintText: String, value: String, x: Double, y: Double,
+                             width: Double, length: Int, type: Int): EditText {
+        val input = EditText(this).apply {
+            setSingleLine()
+            inputType = type
+            setPadding(11, 0, 11, 0)
+            includeFontPadding = false
+            gravity = Gravity.CENTER_VERTICAL
+            hint = hintText
+            contentDescription = name
+            setText(value)
+            setTextColor(Color.parseColor(brown))
+            setHintTextColor(Color.parseColor("#796c61"))
+            filters = arrayOf(InputFilter.LengthFilter(length))
+            background = rounded("#fffdf8").apply {
+                setStroke(1, Color.parseColor("#d9cbbe"))
+            }
+            setTag(R.id.design_text_size, 16.8f)
+        }
+        surface.place(input, x, y, width, 44.8)
+        return input
     }
 
     private fun seedScreen() {
@@ -233,14 +256,14 @@ class MainActivity : Activity() {
         if (screen == "journal") journal.stopTransientWork()
         if (screen == "profile") { if (store.hasProfile()) { profile = store.load(); screen = "seed"; render() } else finish(); return }
         AlertDialog.Builder(this).setTitle("정보 관리")
-            .setItems(arrayOf("내 정보와 첫 목표 수정", "씨앗 화면 보기", "저장한 정보 모두 삭제", "앱 종료")) { _, item ->
+            .setItems(arrayOf("내 정보 수정", "씨앗 화면 보기", "저장한 정보 모두 삭제", "앱 종료")) { _, item ->
                 when (item) {
                     0 -> { profile = store.load(); screen = "profile"; render() }
                     1 -> { screen = "seed"; render() }
                     2 -> AlertDialog.Builder(this).setTitle("저장한 정보를 삭제할까요?")
                         .setMessage("호칭, 기록할 순간, 연령대, 성별, 목표, 일기와 씨앗·날씨 선택이 삭제돼요.")
                         .setNegativeButton("취소", null).setPositiveButton("삭제") { _, _ ->
-                            if (journal.clear() && store.clear()) { profile = Profile(); screen = "profile"; render() }
+                            if (journal.clear() && store.clear()) { profile = Profile(nickname = ""); screen = "profile"; render() }
                             else Toast.makeText(this, "삭제하지 못했어요.", Toast.LENGTH_LONG).show()
                         }.show()
                     3 -> finish()

@@ -4,6 +4,9 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.PictureDrawable
 import android.os.Bundle
@@ -41,7 +44,11 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private var microphonePermissionPending = false
     private var latestSavedId: String? = state?.getString("journal_latest_saved")
     private val pictures = mutableMapOf<String, Drawable.ConstantState>()
-    private val files = host.assets.list("art").orEmpty().associateBy { it.substringBeforeLast('.') }
+    private val files = host.assets.list("art").orEmpty()
+        .associate { it.substringBeforeLast('.') to "art/$it" } + ("sprout" to "sprout.svg")
+    private val characterSheet by lazy {
+        host.assets.open("art/book2.png").use { BitmapFactory.decodeStream(it) }
+    }
     private val brown = "#4b372f"
     private val muted = "#806d60"
     private val paper = "#fffefa"
@@ -53,6 +60,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private var dayPage = state?.getInt("journal_dates") ?: 0
     private var detailId = state?.getString("journal_detail")
     private var detailBack = state?.getString("journal_detail_back") ?: "dates"
+    private var draftYear = state?.getInt("journal_year_draft") ?: month.year
+    private var detailTimeId: String? = state?.getString("journal_detail_time")
     private var detailTab = state?.getInt("journal_detail_tab") ?: 0
     private var flower = Mood.entries.getOrElse(state?.getInt("journal_flower") ?: 0) { Mood.CALM }
     private var flowerBack = state?.getString("journal_flower_back") ?: "flowers"
@@ -75,6 +84,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         out.putString("journal_detail", detailId)
         out.putString("journal_detail_back", detailBack)
         out.putInt("journal_detail_tab", detailTab)
+        out.putInt("journal_year_draft", draftYear)
+        out.putString("journal_detail_time", detailTimeId)
         out.putInt("journal_flower", flower.ordinal)
         out.putString("journal_flower_back", flowerBack)
     }
@@ -82,11 +93,22 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     fun go(next: String) {
         if (next != page) cancelRecording()
         if (next != page) stopMusic()
+        if (next == "years") draftYear = month.year
+        if (next == "books" && page == "home") {
+            month = YearMonth.now()
+            half = (month.monthValue - 1) / 6
+        }
         page = next
         host.render()
     }
 
     fun back(): Boolean {
+        if (page == "home" && speechPhase != null && speechPhase != SpeechPhase.TRANSCRIBING) {
+            cancelSpeech()
+            message = ""
+            host.render()
+            return true
+        }
         val next = when (page) {
             "home" -> return false
             "dates", "years" -> "books"
@@ -155,8 +177,25 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun art(name: String, x: Number, y: Number, w: Number, h: Number, description: String? = null) {
+        if (name == "mind-violet") {
+            val violet = object : View(host) {
+                override fun onDraw(canvas: Canvas) {
+                    // The third character in the first row of the original Figma artwork.
+                    val source = Rect(588, 17, 820, 275)
+                    val scale = minOf(width.toFloat() / source.width(), height.toFloat() / source.height())
+                    val left = ((width - source.width() * scale) / 2).toInt()
+                    val top = ((height - source.height() * scale) / 2).toInt()
+                    val destination = Rect(left, top, left + (source.width() * scale).toInt(),
+                        top + (source.height() * scale).toInt())
+                    canvas.drawBitmap(characterSheet, source, destination, null)
+                }
+            }
+            violet.contentDescription = description
+            host.surface.place(violet, x, y, w, h)
+            return
+        }
         val filename = files[name] ?: return
-        val drawable = pictures[name]?.newDrawable() ?: host.assets.open("art/$filename").use {
+        val drawable = pictures[name]?.newDrawable() ?: host.assets.open(filename).use {
             if (filename.endsWith(".svg")) PictureDrawable(SVG.getFromInputStream(it).renderToPicture())
             else Drawable.createFromStream(it, filename)
         } ?: return
@@ -250,7 +289,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         val date = if (night) today else today.minusDays(1)
         val entries = db.entries().filter { it.date == date }
         val recent = entries.firstOrNull()
-        val todayFlower = db.entries().firstOrNull { it.date == today && it.flower != null }?.flower
+        val todayFlower = if (night) db.entries().firstOrNull { it.date == today && it.flower != null }?.flower else null
         notebook(38)
         notebook(706)
         label(if (night) "오늘의 일기" else "어제의 일기", 60, 104, 235, 28, 14f, "#536548", true)
@@ -270,28 +309,47 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         art("tail", 499.2, 178.8, 25.6, 15.2)
         label(message.ifBlank { if (night) "오늘은 어떤 하루였나요?" else "어떤 마음으로\n출발할까요?" },
             365, 100, 294, 74, 21f, bold = true, center = true)
-        art(if (night && todayFlower != null) "flower${todayFlower.art}" else "morning", 409.6, 181.6, 204.8, 204.8, "마음꽃")
-        panel(481, 340, 62, 59, "#eaccc4")
-        panel(487, 345, 50, 50, "#a46057")
-        if (speechPhase == SpeechPhase.RECORDING) {
-            label("Ⅱ", 487, 345, 50, 49, 23f, paper, true, center = true)
-        } else {
-            art("mic", 506, 358, 12, 18)
-        }
-        val caption = when (speechPhase) {
-            SpeechPhase.STARTING -> "마이크 준비 중…"
-            SpeechPhase.RECORDING -> "일시정지"
-            SpeechPhase.TRANSCRIBING -> "텍스트 저장 중…"
-            null -> if (voiceDraft != null) "다시 저장" else "일기 녹음"
-        }
-        panel(428, 399, 168, 27, "#fff5ea")
-        label(caption, 428, 399, 168, 27, 14f, center = true)
-        if (speechPhase == SpeechPhase.RECORDING || speechPhase == null) {
-            hit(caption, 428, 340, 168, 86) { handleVoiceControl() }
-        }
+        art(if (night && todayFlower != null) characterArt(todayFlower) else "morning", 409.6, 181.6, 204.8, 204.8, "마음꽃")
         val latestSaved = db.entries().firstOrNull { it.id == latestSavedId }
-        if (speechPhase == null && voiceDraft == null && latestSaved != null) {
-            button("방금 저장한 일기 보기 ›", 372, 430, 280, 31, paper) { openDiary(latestSaved, "home") }
+        when (speechPhase) {
+            SpeechPhase.RECORDING -> {
+                panel(348, 356, 328, 72, "#fff6ec")
+                art("recording_dot", 397, 369, 9.2, 9.2)
+                label("녹음 중", 412, 360, 100, 24, 15f, bold = true)
+                art("recording_wave", 528, 361, 98, 22)
+                button("취소", 361, 390, 95, 33, "#f2e8e0") {
+                    cancelSpeech()
+                    message = ""
+                    host.render()
+                }
+                button("일시정지", 463, 390, 200, 33, rose, paper) { handleVoiceControl() }
+            }
+            SpeechPhase.STARTING, SpeechPhase.TRANSCRIBING -> {
+                panel(348, 371, 328, 45, "#fff6ec")
+                label(if (speechPhase == SpeechPhase.STARTING) "마이크 준비 중…" else "텍스트 저장 중…",
+                    348, 371, 328, 45, 15f, center = true)
+            }
+            null -> {
+                if (voiceDraft == null && latestSaved != null) {
+                    panel(348, 371, 328, 45, "#fffdf8")
+                    art("recording_saved", 366, 383, 19.2, 19.2)
+                    label("일기를 저장했어요", 394, 371, 181, 45, 15f, bold = true)
+                    button("확인", 583, 376, 83, 35) {
+                        latestSavedId = null
+                        message = ""
+                        host.render()
+                    }
+                    button("방금 저장한 일기 보기 ›", 372, 430, 280, 31, paper) { openDiary(latestSaved, "home") }
+                } else {
+                    panel(481, 374, 62, 59, "#eaccc4")
+                    panel(487, 379, 50, 50, "#a46057")
+                    art("mic", 506, 392, 12, 18)
+                    val caption = if (voiceDraft != null) "다시 저장" else "일기 녹음"
+                    panel(452, 431, 120, 24, "#fff5ea")
+                    label(caption, 452, 431, 120, 24, 14f, center = true)
+                    hit(caption, 451, 373, 122, 82) { handleVoiceControl() }
+                }
+            }
         }
 
         if (night) {
@@ -466,6 +524,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         detailId = entry.id
         detailBack = returnTo
         detailTab = 0
+        detailTimeId = entry.id
         go("detail")
     }
 
@@ -477,7 +536,17 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
 
     companion object {
         private val dateFormat = DateTimeFormatter.ofPattern("yyyy년 M월 d일 EEEE", Locale.KOREAN)
+        private val clockFormat = DateTimeFormatter.ofPattern("HH:mm")
         private val shortDate = DateTimeFormatter.ofPattern("M월 d일 EEEE", Locale.KOREAN)
+    }
+
+    private fun characterArt(mood: Mood): String = when (mood) {
+        Mood.CALM -> "evening"
+        Mood.WORRY -> "mind-violet"
+        Mood.TIRED -> "book5"
+        Mood.JOY -> "book3"
+        Mood.EXCITED -> "book4"
+        Mood.SAD -> "book6"
     }
 
     private fun drive() {
@@ -496,6 +565,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             721, 182, 233, 59, 16f, center = true)
         art("morning", 765, 242, 145, 145, "마음꽃")
         val character = host.surface.getChildAt(host.surface.childCount - 1)
+        if (drive == 1) art("recording_wave", 807, 394, 61, 21, "음성 파형")
         when (drive) {
             1 -> character.animate().scaleX(1.12f).scaleY(1.12f).setDuration(350).withEndAction {
                 character.animate().scaleX(1f).scaleY(1f).setDuration(350).start()
@@ -509,15 +579,21 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun books() {
-        button("${month.year} ﹀", 424, 81, 181, 44, paper) { go("years") }
-        button("날짜별", 772, 88, 185, 38) { openMonth(month, if (month == YearMonth.now()) (today.dayOfMonth - 1) / 6 else 0) }
-        if (db.entries().none { it.date.year == month.year } && month.year != today.year) {
-            label("이 해에는 아직 남긴 일기가 없어요.", 130, 208, 764, 110, 24f, center = true)
+        val entriesByMonth = db.entries().filter { it.date.year == month.year }.groupBy { it.date.monthValue }
+        if (entriesByMonth.isEmpty() && month.year != today.year) {
+            art("sprout", 451, 120, 122, 122, "기록을 기다리는 새싹")
+            label(month.year.toString(), 350, 255, 324, 49, 36f, bold = true, center = true)
+            label("기록 없음", 350, 306, 324, 35, 17f, muted, center = true)
+            button("연도 선택", 407, 361, 210, 43) { go("years") }
             return
+        }
+        button("${month.year} ﹀", 424, 81, 181, 44, paper) { go("years") }
+        button("날짜별", 772, 88, 185, 38) {
+            val value = if (month.year == today.year) YearMonth.now() else month
+            openMonth(value, if (value == YearMonth.now()) (today.dayOfMonth - 1) / 6 else 0)
         }
         val covers = listOf("#e9cfc7", "#dbe4cf", "#efe0b6", "#e3d9ed", "#ead8bc", "#d4e2e1")
         val spines = listOf("#bd8478", "#889a70", "#c8a04e", "#a492bc", "#bc956b", "#819fa0")
-        val entriesByMonth = db.entries().filter { it.date.year == month.year }.groupBy { it.date.monthValue }
         repeat(6) { i ->
             val m = half * 6 + i + 1
             val x = 133 + i % 3 * 313
@@ -529,7 +605,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             repeat(4) { ring -> panel(x - 6, y + 19 + ring * 25, 16, 5, paper) }
             val entries = entriesByMonth[m].orEmpty()
             val coverFlower = entries.firstNotNullOfOrNull { it.mood }
-            if (coverFlower != null) art("flower${coverFlower.art}", x + 27, y + 8, 94, 84)
+            if (coverFlower != null) art(characterArt(coverFlower), x + 27, y + 8, 94, 84)
             label(if (entries.isEmpty()) "기록 없음" else "${entries.size}편",
                 x + 20, y + 91, 104, 28, 13f, center = true)
             label("${m}월", x, y + 136, 124, 28, 17f, center = true)
@@ -540,17 +616,31 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun years() {
-        button("‹ 일기장", 45, 82, 169, 42, paper) { go("books") }
-        label("연도 선택", 312, 82, 400, 50, 25f, bold = true, center = true)
         val lowest = minOf(today.year - 4, db.entries().minOfOrNull { it.date.year } ?: today.year)
-        if (month.year > lowest) button("‹", 302, 224, 54, 49) { month = month.minusYears(1); host.render() }
-        button("${month.year}년", 365, 207, 294, 81, green, brown, true) { go("books") }
-        if (month.year <= today.year) button("›", 669, 224, 54, 49) { month = month.plusYears(1); host.render() }
-        label("연도를 선택하여 일기장을 열어요.", 248, 311, 528, 59, 17f, muted, center = true)
+        val highest = maxOf(today.year + 1, month.year)
+        for (year in maxOf(lowest, draftYear - 2)..minOf(highest, draftYear + 2)) {
+            val selected = year == draftYear
+            val top = 214 + (draftYear - year) * 43
+            if (selected) {
+                panel(408, top, 208, 43, "#efe2d6")
+                label(year.toString(), 408, top, 208, 43, 32f, bold = true, center = true)
+            } else {
+                button(year.toString(), 408, top, 208, 43, "#00000000", muted) {
+                    draftYear = year
+                    host.render()
+                }
+            }
+        }
+        button("뒤로", 341, 367, 158, 44, paper) { go("books") }
+        button("확인", 520, 367, 158, 44, rose, paper) {
+            month = month.withYear(draftYear)
+            go("books")
+        }
     }
 
     private fun openMonth(value: YearMonth, index: Int = 0) {
         month = value
+        half = (value.monthValue - 1) / 6
         dayPage = index
         go("dates")
     }
@@ -581,9 +671,15 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 host.surface.place(sprout, x + 222, y + 19, 50, 58)
             } else {
                 val mood = entries.firstNotNullOfOrNull { it.mood }
-                art(mood?.let { "flower${it.art}" } ?: "morning", x + 219, y + 12, 63, 66)
+                art(mood?.let(::characterArt) ?: "morning", x + 219, y + 12, 63, 66)
                 hit("${month.monthValue}월 ${day}일 일기 보기", x, y, 289, 99) { selectDay(entries, "dates") }
             }
+        }
+        for (slot in (last - first + 1) until 6) {
+            val x = 62 + slot % 3 * 306
+            val y = 152 + slot / 3 * 112
+            panel(x, y, 289, 99, "#f1ebe2")
+            label("—", x, y, 289, 99, 17f, muted, center = true)
         }
         if (dayPage > 0) button("‹ 이전 날짜", 139, 391, 164, 36) { dayPage--; host.render() }
         label("$first–${last}일  ·  ${dayPage + 1}/${(month.lengthOfMonth() + 5) / 6}", 360, 389, 304, 42, 17f, muted, center = true)
@@ -599,28 +695,74 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun detail() {
-        button("‹ 날짜별 목차", 45, 81, 169, 42, paper) { go(detailBack) }
-        val entry = db.entries().firstOrNull { it.id == detailId }
+        val records = db.entries()
+        val entry = records.firstOrNull { it.id == detailId }
         if (entry == null) {
+            button("‹ 뒤로", 45, 81, 169, 42, paper) { go(detailBack) }
             label("일기를 찾을 수 없어요.", 220, 190, 584, 90, 23f, center = true)
             return
         }
-        panel(47, 137, 344, 308, "#f0e9d9")
-        panel(398, 137, 582, 308)
-        label(entry.date.format(shortDate), 67, 154, 304, 46, 23f, bold = true)
-        art(entry.flower?.let { "flower${it.art}" } ?: "morning", 110, 186, 197, 198)
-        label(entry.flower?.let { "${it.flower} · ${it.meaning}" } ?: "${entry.moment} 일기",
-            65, 382, 310, 43, 19f, center = true)
+        button("‹ 월별 일기장", 45, 81, 169, 42, paper) {
+            month = YearMonth.from(entry.date)
+            half = (month.monthValue - 1) / 6
+            go("books")
+        }
+        button("날짜별 목차", 805, 81, 169, 42) {
+            openMonth(YearMonth.from(entry.date), (entry.date.dayOfMonth - 1) / 6)
+        }
+        val dayEntries = records.filter { it.date == entry.date }.sortedBy { it.time }
+        val selected = dayEntries.firstOrNull { it.id == detailTimeId } ?: entry
+        panel(47, 137, 344, 279, "#f0e9d9")
+        panel(398, 137, 582, 279)
+        label(entry.date.format(shortDate), 67, 154, 304, 40, 23f, bold = true)
+        val mood = selected.mood
+        art(mood?.let(::characterArt) ?: "morning", 77, 192, 150, 128)
+        label(mood?.let { "${it.title} · ${it.flower}" } ?: "${selected.moment} 일기",
+            230, 220, 148, 55, 17f, bold = true)
+        label("하루 속 감정 변화", 65, 308, 295, 23, 15f, bold = true)
+        val moodTrack = object : View(host) {
+            private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+            override fun onDraw(canvas: Canvas) {
+                val step = width.toFloat() / dayEntries.size
+                val y = height / 2f
+                paint.color = Color.parseColor("#d8cabb")
+                paint.strokeWidth = 2f
+                canvas.drawLine(step / 2f, y, width - step / 2f, y, paint)
+                dayEntries.forEachIndexed { index, item ->
+                    paint.color = Color.parseColor(item.mood?.color ?: "#c9b9a8")
+                    canvas.drawCircle(step * (index + 0.5f), y, if (item.id == selected.id) 7f else 5f, paint)
+                }
+            }
+        }
+        host.surface.place(moodTrack, 65, 333, 305, 17)
+        val timeline = android.widget.HorizontalScrollView(host).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(android.widget.LinearLayout(host).apply {
+                for (item in dayEntries) {
+                    addView(Button(host).apply {
+                        text = item.time.format(clockFormat)
+                        contentDescription = "${text} · ${item.mood?.title ?: item.moment} 기록"
+                        isSelected = item.id == selected.id
+                        setOnClickListener {
+                            detailTimeId = item.id
+                            detailTab = 1
+                            host.render()
+                        }
+                    })
+                }
+            })
+        }
+        host.surface.place(timeline, 65, 352, 305, 48)
         listOf("요약 일기", "시간별 기록", "음성 기록").forEachIndexed { i, value ->
-            button(value, 684 + i * 97, 84, 91, 35, if (detailTab == i) green else paper) {
+            button(value, 477 + i * 104, 85, 97, 35, if (detailTab == i) green else paper) {
                 detailTab = i
                 host.render()
             }
         }
         val content = when (detailTab) {
             0 -> entry.body
-            1 -> db.entries().filter { it.date == entry.date }.sortedBy { it.time }
-                .joinToString("\n\n") { "${it.time.format(DateTimeFormatter.ofPattern("HH:mm"))}  ${it.moment}\n${it.body}" }
+            1 -> "${selected.time.format(clockFormat)}  ${selected.moment}\n${selected.body}"
             else -> if (entry.voice) entry.body else "음성으로 작성한 기록이 없어요."
         }
         val body = android.widget.TextView(host).apply {
@@ -629,15 +771,21 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             setTextColor(Color.parseColor(brown))
             setLineSpacing(5f, 1f)
         }
-        val scroll = ScrollView(host).apply { addView(body) }
-        host.surface.place(scroll, 421, 163, 536, 214)
-        button("수정", 421, 390, 92, 39) { editDiary(entry) }
-        if (entry.moment == "도착") button("꽃 선택", 524, 390, 123, 39) { chooseFlower(entry) }
-        button("삭제", 854, 390, 103, 39, "#f1dfd9") {
+        host.surface.place(ScrollView(host).apply { addView(body) }, 421, 163, 536, 192)
+        button("수정", 421, 367, 92, 39) { editDiary(entry) }
+        if (entry.moment == "도착") button("꽃 선택", 524, 367, 123, 39) { chooseFlower(entry) }
+        button("삭제", 854, 367, 103, 39, "#f1dfd9") {
             AlertDialog.Builder(host).setTitle("이 일기를 삭제할까요?")
                 .setNegativeButton("취소", null).setPositiveButton("삭제") { _, _ ->
                     if (db.delete(entry.id)) go(detailBack) else msg("일기를 삭제하지 못했어요.")
                 }.show()
+        }
+        val index = records.indexOf(entry)
+        records.getOrNull(index + 1)?.let { older ->
+            button("‹ 이전 일기", 45, 421, 150, 34) { openDiary(older, detailBack) }
+        }
+        records.getOrNull(index - 1)?.let { newer ->
+            button("다음 일기 ›", 830, 421, 150, 34) { openDiary(newer, detailBack) }
         }
     }
 
@@ -663,7 +811,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     if (db.toggle(task)) host.render() else msg("목표를 저장하지 못했어요.")
                 }
             }
-            label("오늘 실행률  ${completion()}%", 599, 217, 333, 52, 23f, rose, true)
+            val percent = completion()
+            label("오늘 실행률  $percent%", 599, 217, 333, 52, 23f, rose, true)
+            panel(599, 264, 333, 8, "#e7e5d9")
+            if (percent > 0) panel(599, 264, 333 * percent / 100, 8, "#83996e")
             label(db.goalEnd()?.let { "목표 돌아보기 · ${it.format(shortDate)}" } ?: "목표 기간 · 1주",
                 599, 280, 333, 39, 16f)
             button("목표 설정", 599, 353, 333, 44, rose, paper) {
@@ -779,6 +930,23 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
 
     private fun overview() {
         val entries = db.month(month)
+        if (page == "streak") {
+            myTabs(0)
+            panel(165, 186, 687, 197)
+            label("${month.year}년 ${month.monthValue}월", 185, 195, 500, 32, 20f, bold = true)
+            val recordedDays = entries.map { it.date.dayOfMonth }.toSet()
+            for (day in 1..month.lengthOfMonth()) {
+                val x = 185 + (day - 1) % 7 * 93
+                val y = 230 + (day - 1) / 7 * 28
+                if (day in recordedDays) button("$day ✓", x, y, 87, 25, green) {
+                    selectDay(entries.filter { it.date.dayOfMonth == day }, "streak")
+                } else label(day.toString(), x, y, 87, 25, 14f, muted, center = true)
+            }
+            label(db.streak().toString(), 850, 210, 140, 62, 47f, rose, true, center = true)
+            label("일 연속 작성", 850, 275, 140, 34, 16f, muted, center = true)
+            monthTitle(68)
+            return
+        }
         val flowers = entries.filter { it.flower != null }
         val top = distribution(entries).firstOrNull()
         monthTitle()
@@ -790,7 +958,13 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 label("${month.monthValue}월 꽃다발", 59, 169, 424, 41, 23f, bold = true)
                 if (flowers.isEmpty()) label("이달에 피어난 꽃이 없어요.", 58, 218, 424, 137, 18f, center = true)
                 else {
-                    art("bouquet", 106, 211, 302, 165, "마음 꽃다발")
+                    val bouquet = flowers.groupingBy { it.flower!! }.eachCount().entries.sortedByDescending { it.value }
+                    bouquet.forEachIndexed { index, (mood, count) ->
+                        val x = 101 + (index % 3) * 116
+                        val y = 214 + (index / 3) * 72
+                        art("flower${mood.art}", x, y, 86, 62, mood.flower)
+                        label("${count}송이", x + 56, y + 34, 57, 24, 13f, muted)
+                    }
                     label("이달에 ${flowers.map { it.date }.distinct().size}일 동안 꽃을 피웠어요.",
                         59, 371, 424, 31, 14f, center = true)
                 }
@@ -798,13 +972,13 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 label("감정 비율", 540, 171, 418, 39, 23f, bold = true)
                 bars(entries, 541, 217, 417, 33)
             }
-            "streak", "month_summary" -> {
-                if (page == "month_summary") button("‹ 마이페이지", 38, 82, 194, 34) { go("summary") }
+            "month_summary" -> {
+                button("‹ 마이페이지", 38, 82, 194, 34) { go("summary") }
                 panel(38, 142, 445, 300)
                 panel(497, 142, 489, 300)
                 label("하루하루의 감정", 57, 151, 406, 38, 21f, bold = true)
                 calendar(entries, 55, 192, 410, 36, page)
-                label(if (page == "streak") "${db.streak()}일 연속 작성" else "가장 많이 느낀 감정",
+                label("가장 많이 느낀 감정",
                     517, 151, 448, 52, 22f, bold = true)
                 label(top?.let { "${it.first.title} ${it.second}%" } ?: "기록을 하나씩 쌓아보세요.",
                     517, 206, 448, 32, 24f, rose, true)
@@ -849,7 +1023,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         if (page == "flower") {
             button("‹ 돌아가기", 45, 82, 171, 42, paper) { go(flowerBack) }
             panel(45, 140, 339, 305, green)
-            art("flower${flower.art}", 123, 165, 183, 175, flower.flower)
+            art(characterArt(flower), 60, 141, 309, 219, flower.flower)
             label(flower.flower, 45, 350, 339, 55, 27f, bold = true, center = true)
             panel(406, 140, 572, 305)
             label("꽃말 · ${flower.meaning}", 425, 168, 535, 55, 23f, rose, true)
@@ -862,41 +1036,70 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             }
             return
         }
-        monthTitle()
-        myTabs(2)
         if (page == "garden") {
-            art("garden_base", 38.4, 158, 947.2, 277.5)
-            art("garden_banks", 38.4, 166.3, 947.2, 269.2)
-            art("garden_path", 110.1, 179.3, 875.5, 256.2)
-            art("garden_grass", 150.6, 235.2, 751.2, 157.7)
+            monthTitle()
+            myTabs(2)
+            button("월별 꽃 보기", 60, 69, 190, 31) { go("bed") }
+            button("꽃도감 ›", 771, 69, 190, 31) { go("flowers") }
+            gardenBackground()
             for (value in 1..12) {
                 val x = 72 + ((value - 1) % 6) * 151
                 val y = 188 + ((value - 1) / 6) * 105
-                val bloom = entries.firstOrNull { it.date.monthValue == value }?.flower
-                bloom?.let { art("flower${it.art}", x + 42, y - 16, 51, 46) }
-                button("${value}월", x, y + 31, 134, 37, if (bloom == null) paper else green) {
+                val blooms = entries.filter { it.date.monthValue == value }.mapNotNull { it.flower }.distinct()
+                blooms.take(3).forEachIndexed { i, bloom ->
+                    art("flower${bloom.art}", x + 16 + i * 36, y - 17, 40, 47)
+                }
+                button("${value}월", x, y + 31, 134, 37, if (blooms.isEmpty()) paper else green) {
                     month = YearMonth.of(month.year, value)
+                    half = (value - 1) / 6
                     go("bed")
                 }
             }
-            button("꽃도감", 763, 411, 196, 36) { go("flowers") }
-        } else {
-            button("‹ 정원", 46, 151, 118, 36, paper) { go("garden") }
-            label(if (page == "bed") "${month.monthValue}월에 피어난 꽃" else "꽃도감",
-                175, 150, 550, 39, 22f, bold = true)
-            if (page == "bed") button("꽃도감", 788, 151, 180, 36) { go("flowers") }
-            val source = if (page == "bed") monthly else entries
-            val moods = if (page == "bed") monthly.mapNotNull { it.flower }.distinct() else Mood.entries.toList()
-            if (moods.isEmpty()) label("아직 피어난 꽃이 없어요.", 142, 201, 740, 163, 21f, center = true)
-            moods.forEachIndexed { i, value ->
-                val x = 47 + i % 3 * 313
-                val y = 196 + i / 3 * 119
-                panel(x, y, 300, 107, paper)
-                art("flower${value.art}", x + 15, y + 12, 72, 81)
-                label(value.flower, x + 104, y + 16, 180, 37, 20f, bold = true)
-                label("${source.count { it.flower == value }}회 피었어요", x + 104, y + 53, 180, 33, 15f, muted)
-                hit(value.flower, x, y, 300, 107) { openFlower(value, page) }
-            }
+            return
         }
+        button("‹ 정원으로", 45, 81, 171, 38, paper) { go("garden") }
+        if (page == "bed") {
+            label("${month.monthValue}월", 405, 76, 214, 45, 25f, bold = true, center = true)
+            for (value in 1..12) {
+                button("${value}월", 39 + (value - 1) * 79, 129, 73, 34,
+                    if (value == month.monthValue) "#536548" else green,
+                    if (value == month.monthValue) paper else brown) {
+                    month = month.withMonth(value)
+                    half = (value - 1) / 6
+                    host.render()
+                }
+            }
+            gardenBackground(178)
+            val blooms = monthly.mapNotNull { it.flower }.distinct()
+            if (blooms.isEmpty()) {
+                label("이달에 피어난 꽃이 없어요.", 142, 241, 740, 133, 21f, center = true)
+            }
+            blooms.forEachIndexed { i, bloom ->
+                val x = 84 + (i % 3) * 301
+                val y = if (blooms.size <= 3) 208 else 185 + (i / 3) * 126
+                val size = if (blooms.size <= 3) 120 else 83
+                art("flower${bloom.art}", x + (250 - size) / 2, y, size, size)
+                button("${bloom.flower} · ${monthly.count { it.flower == bloom }}송이",
+                    x, y + size, 250, 32, paper) { openFlower(bloom, "bed") }
+            }
+            return
+        }
+        label("꽃도감", 405, 76, 214, 45, 25f, bold = true, center = true)
+        Mood.entries.forEachIndexed { i, value ->
+            val x = 47 + i % 3 * 313
+            val y = 142 + i / 3 * 146
+            panel(x, y, 300, 131, paper)
+            art("flower${value.art}", x + 16, y + 14, 83, 97)
+            label(value.flower, x + 113, y + 27, 170, 34, 20f, bold = true)
+            label("꽃말 · ${value.meaning}", x + 113, y + 65, 170, 33, 15f, muted)
+            hit(value.flower, x, y, 300, 131) { openFlower(value, "flowers") }
+        }
+    }
+
+    private fun gardenBackground(top: Int = 158) {
+        art("garden_base", 38.4, top, 947.2, 435 - top)
+        art("garden_banks", 38.4, top + 8.3, 947.2, 426.7 - top)
+        art("garden_path", 110.1, top + 21.3, 875.5, 413.7 - top)
+        art("garden_grass", 150.6, top + 77.2, 751.2, 315.7 - top)
     }
 }

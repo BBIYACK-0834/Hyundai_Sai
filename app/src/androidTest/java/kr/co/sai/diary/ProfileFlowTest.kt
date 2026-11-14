@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -56,25 +57,38 @@ class ProfileFlowTest {
             capture("03-weather")
         }
     }
-    @Test fun selectedProfileSurvivesRecreation() {
+    private fun input(activity: MainActivity, name: String): EditText =
+        descendants(activity.window.decorView).filterIsInstance<EditText>().single { it.contentDescription == name }
+
+    @Test fun profileDraftSurvivesRecreation() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { a -> click(a, "정원사"); click(a, "도착했을 때"); click(a, "30대"); click(a, "한 번 깊게 숨 고르기") }
+            scenario.onActivity { activity ->
+                input(activity, "호칭").setText("정원사 김")
+                input(activity, "나이").setText("25")
+                input(activity, "성별 (선택)").setText("직접 입력")
+            }
             scenario.recreate()
-            scenario.onActivity { a ->
-                val selected = descendants(a.window.decorView).filterIsInstance<Button>().filter { it.isSelected }.map { it.text.toString() }
-                assertTrue(selected.containsAll(listOf("정원사", "도착했을 때", "30대", "한 번 깊게 숨 고르기")))
+            scenario.onActivity { activity ->
+                assertEquals("정원사 김", input(activity, "호칭").text.toString())
+                assertEquals("25", input(activity, "나이").text.toString())
+                assertEquals("직접 입력", input(activity, "성별 (선택)").text.toString())
             }
         }
     }
-    @Test fun ageCanBeClearedAndGenderIsOptional() {
+
+    @Test fun invalidAgeStaysOnProfileAndGenderCanBeBlank() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { a ->
-                click(a, "20대"); click(a, "20대")
-                val selected = descendants(a.window.decorView).filterIsInstance<Button>().filter { it.isSelected }.map { it.text.toString() }
-                assertFalse(selected.contains("20대")); assertTrue(selected.contains("선택 안 함"))
+            scenario.onActivity { activity ->
+                input(activity, "호칭").setText("정원사")
+                input(activity, "나이").setText("131")
+                click(activity, "다음")
+                assertNotNull(input(activity, "나이").error)
+                assertTrue(input(activity, "성별 (선택)").text.isEmpty())
+                assertFalse(ProfileStore(context).hasProfile())
             }
         }
     }
+
     @Test fun dataPersistsAndDeletesCompletely() {
         val store = ProfileStore(context)
         val expected = Profile("운전자", "출발할 때", "30대", "선택 안 함", "고마운 순간 떠올리기")
@@ -133,4 +147,28 @@ class ProfileFlowTest {
             }
         }
     }
+
+    @Test fun yearPickerConfirmsBeforeChangingAndOpensEmptyState() {
+        ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
+        val currentYear = LocalDateTime.now().year
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "기록" }.performClick()
+                click(activity, "$currentYear ﹀")
+                click(activity, (currentYear - 1).toString())
+                click(activity, "뒤로")
+                click(activity, "$currentYear ﹀")
+                click(activity, (currentYear - 1).toString())
+                click(activity, "확인")
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == "기록 없음" })
+                click(activity, "연도 선택")
+                click(activity, currentYear.toString())
+                click(activity, "확인")
+                click(activity, "날짜별")
+            }
+        }
+    }
+
 }

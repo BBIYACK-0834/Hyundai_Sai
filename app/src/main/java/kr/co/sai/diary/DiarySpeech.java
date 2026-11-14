@@ -1,6 +1,8 @@
 package kr.co.sai.diary;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -87,6 +89,9 @@ final class DiarySpeech {
     }
 
     private short[] recordAudio() throws IOException {
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            throw new SecurityException("Microphone permission is unavailable");
+        }
         int bufferSize = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (bufferSize <= 0) throw new IOException("Audio input format unavailable");
