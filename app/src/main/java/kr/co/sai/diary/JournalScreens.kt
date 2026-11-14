@@ -930,11 +930,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     )
 
     private fun distribution(entries: List<Diary>): List<Pair<Mood, Int>> {
-        val totals = Mood.entries.map { mood ->
-            mood to entries.sumOf { entry ->
-                if (entry.mood == mood) 1 else 0
-            }
-        }.filter { it.second > 0 }.sortedByDescending { it.second }
+        val totals = entries.groupingBy { it.mood }.eachCount().toList()
+            .sortedWith(compareByDescending<Pair<Mood, Int>> { it.second }.thenBy { it.first.ordinal })
         val sum = totals.sumOf { it.second }
         if (sum == 0) return emptyList()
         var cumulative = 0
