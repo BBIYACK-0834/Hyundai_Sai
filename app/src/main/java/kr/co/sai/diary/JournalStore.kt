@@ -44,6 +44,10 @@ internal data class Diary(
 }
 
 
+internal fun representativeEmotion(records: List<Diary>): Mood = records.groupingBy { it.emotion }
+    .eachCount().entries.sortedWith(compareByDescending<Map.Entry<Mood, Int>> { it.value }
+        .thenBy { it.key.ordinal }).firstOrNull()?.key ?: Mood.CALM
+
 internal fun normalizeDiaryTags(text: String): List<String> = text.split(Regex("[,，#\\s]+"))
     .map { it.trim().take(12) }.filter { it.isNotEmpty() }.distinct().take(6)
 

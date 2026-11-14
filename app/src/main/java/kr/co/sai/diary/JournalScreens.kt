@@ -831,17 +831,27 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         panel(47, 137, 257, 279, "#f0e9d9")
         panel(316, 137, 664, 279)
         label(entry.date.format(shortDate), 62, 154, 227, 40, 22f, bold = true, center = true)
-        val topMood = if (detailTab == 0) distribution(dayEntries).firstOrNull()?.first ?: entry.mood
-            else selected?.mood ?: entry.mood
-        art(characterArt(topMood), 100, 198, 151, 121, topMood.flower)
-        label(if (detailTab == 0) "하루 대표 감정 · ${topMood.title}" else "감정 · ${topMood.title}",
-            61, 323, 228, 34, 16f, bold = true, center = true)
-        label(if (detailTab == 0) "${dayEntries.size}개의 기록을 모았어요" else selected?.moment.orEmpty(),
-            61, 362, 228, 28, 14f, muted, center = true)
+        val dailyMood = representativeEmotion(dayEntries)
+        val classifiedMood = if (detailTab == 0) dailyMood else selected?.emotion
+        val classifiedText = if (detailTab == 0) dayEntries.joinToString(" ") { it.body }
+            else selected?.body.orEmpty()
+        val keywords = classifiedMood?.words.orEmpty().filter { classifiedText.contains(it) }.take(3)
 
-        val classifiedText = if (detailTab == 0) dayEntries.joinToString(" ") { it.body } else selected?.body.orEmpty()
-        label(if (Mood.scores(classifiedText).isEmpty()) "일치 없음 · 평온으로 임시 표시" else "키워드 기반 임시 분류",
-            61, 394, 228, 19, 11f, muted, center = true)
+        // One flower represents the whole day, independently of the selected time or tab.
+        art(characterArt(dailyMood), 60, 211, 122, 132, "하루 대표 꽃: ${dailyMood.flower}")
+        label("하루의 마음꽃", 60, 345, 122, 20, 12f, muted, center = true)
+        label(dailyMood.flower, 60, 365, 122, 23, 15f, bold = true, center = true)
+        panel(185, 213, 1, 170, "#dcd2bd")
+
+        label("키워드 분류", 194, 211, 99, 23, 13f, bold = true)
+        label(if (detailTab == 0) "하루 전체" else selected?.time?.format(clockFormat) ?: "기록 없음",
+            194, 237, 99, 20, 12f, muted)
+        label(classifiedMood?.title ?: "—", 194, 260, 99, 31, 21f, bold = true)
+        label("근거 키워드", 194, 299, 99, 21, 11f, muted)
+        label(keywords.joinToString("\n").ifBlank { "일치 없음" }, 194, 322, 99, 59,
+            13f, lines = 3).contentDescription = "분류 키워드: ${keywords.joinToString(", ").ifBlank { "일치 없음" }}"
+        label(if (detailTab == 0) "${dailyMood.title} · ${dayEntries.size}개의 기록"
+            else "하루 대표 감정 · ${dailyMood.title}", 61, 394, 228, 19, 12f, muted, center = true)
 
         listOf("요약 일기", "시간별 기록", "음성 기록").forEachIndexed { i, value ->
             button(value, 344 + i * 148, 81, 136, 42, if (detailTab == i) green else paper,
