@@ -54,7 +54,7 @@ class ProfileFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             capture("02-seed")
             scenario.onActivity { click(it, "씨앗 심기") }
-            capture("03-weather")
+            capture("03-day-home")
         }
     }
     private fun input(activity: MainActivity, name: String): EditText =
@@ -99,23 +99,35 @@ class ProfileFlowTest {
         assertTrue(reopened.clear()); assertFalse(reopened.hasProfile()); assertFalse(reopened.plantedToday())
         assertEquals(Profile(), reopened.load()); assertEquals("낮 맑음", reopened.weather())
     }
-    @Test fun seedMovesToWeatherAndRestoresSelection() {
+    @Test fun demoStartsInDayAndBloomsUsingSavedEmotion() {
         ProfileStore(context).save(Profile())
+        val db = JournalStore(context)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { a -> click(a, "씨앗 심기") }
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            assertTrue(ProfileStore(context).plantedToday())
-            scenario.onActivity { a ->
-                val rain = descendants(a.window.decorView).filterIsInstance<Button>().filter { it.text.toString() == "비" }
-                assertEquals(2, rain.size); rain[1].performClick()
+            scenario.onActivity { activity ->
+                click(activity, "씨앗 심기")
+                assertEquals("낮 맑음", ProfileStore(context).weather())
+                assertEquals("시연 예시", db.entries().single().moment)
+                assertTrue(db.seedYesterday())
+                assertEquals(1, db.entries().size)
+                assertTrue(db.saveSpokenGoal("오늘은 퇴근 후에 산책하고 싶어요."))
+                assertEquals(listOf("오늘 10분 몸 움직이기"), db.tasks(""))
+                val entry = checkNotNull(db.add("오늘 기쁘고 즐거운 일이 있었어요.", "출발", true))
+                assertEquals(Mood.JOY, entry.emotion)
+                assertNull(entry.flower)
+                click(activity, "밤으로 전환")
+                assertEquals("밤 맑음", ProfileStore(context).weather())
+                assertEquals(Mood.JOY, db.entries().first().flower)
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == "꽃말   새로운 시작" })
+                descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "기록" }.performClick()
+                click(activity, "어제 일기")
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString().contains("퇴근길에 노을") })
             }
             scenario.recreate()
-            scenario.onActivity { a ->
-                val labels = descendants(a.window.decorView).filterIsInstance<TextView>().map { it.text.toString() }
-                assertEquals("밤 비", ProfileStore(context).weather())
-                assertTrue("오늘은 어떤 하루였나요?" in labels)
-                assertTrue("오늘의 꽃" in labels)
-            }
+            assertEquals("밤 맑음", ProfileStore(context).weather())
+            assertEquals(2, db.entries().size)
         }
     }
     @Test fun voiceEntryKeepsRecordingDateAndAppearsInRecordsAfterRestart() {

@@ -43,6 +43,9 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private var speechPhase: SpeechPhase? = null
     private var voiceDraft: VoiceDraft? = null
     private var microphonePermissionPending = false
+    private var recordingGoal = false
+    private var pendingGoalText: String? = null
+    private var animateBloom = false
     private var latestSavedId: String? = state?.getString("journal_latest_saved")
     private val pictures = mutableMapOf<String, Drawable.ConstantState>()
     private val files = host.assets.list("art").orEmpty()
@@ -124,10 +127,13 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         return true
     }
 
+    fun prepareDemoDay() = db.seedYesterday(today)
+
     fun clear(): Boolean {
         cancelSpeech()
         stopMusic()
         voiceDraft = null
+        pendingGoalText = null
         latestSavedId = null
         page = "home"
         message = ""
@@ -245,9 +251,28 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         art(icon, 781, 26, 18, 18)
         label(weather.substringAfter(' '), 806, 17, 56, 37)
         art("clock", 872, 26, 18, 18)
-        label(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")), 898, 17, 77, 37)
+        label(if (night) "18:40" else "08:30", 898, 17, 77, 37)
         panel(38, 62, 948, 1, "#e3d7cb")
         if (page == "home") {
+            button(if (night) "낮으로 전환" else "밤으로 전환", 431, 16, 158, 39, paper) {
+                if (speechPhase != null || voiceDraft != null || pendingGoalText != null) {
+                    msg("진행 중인 녹음과 저장을 마친 뒤 전환해 주세요.")
+                    return@button
+                }
+                val target = if (night) "낮" else "밤"
+                if (target == "밤" && !db.bloomToday(today, latestSavedId)) {
+                    msg("꽃을 저장하지 못했어요.")
+                    return@button
+                }
+                if (!host.store.setWeather("$target ${weather.substringAfter(' ')}")) {
+                    msg("시간을 바꾸지 못했어요.")
+                    return@button
+                }
+                animateBloom = target == "밤"
+                latestSavedId = null
+                message = ""
+                host.render()
+            }
             hit("시연 날씨 선택", 768, 16, 96, 39) { cancelRecording(); host.changeWeather() }
             hit("주행 화면 시연", 630, 16, 46, 39) { drive = 0; go("drive") }
         }
@@ -287,10 +312,11 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private fun completion(): Int = tasks().count { it in db.checked() } * 100 / tasks().size
 
     private fun home() {
+        val records = db.entries()
         val date = if (night) today else today.minusDays(1)
-        val entries = db.entries().filter { it.date == date }
+        val entries = records.filter { it.date == date }
         val recent = entries.firstOrNull()
-        val todayFlower = if (night) db.entries().firstOrNull { it.date == today && it.flower != null }?.flower else null
+        val todayFlower = if (night) entries.firstNotNullOfOrNull { it.flower } else null
         notebook(38)
         notebook(706)
         label(if (night) "오늘의 일기" else "어제의 일기", 60, 104, 235, 28, 14f, "#536548", true)
@@ -310,20 +336,29 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         art("tail", 499.2, 178.8, 25.6, 15.2)
         label(message.ifBlank { if (night) "오늘은 어떤 하루였나요?" else "어떤 마음으로\n출발할까요?" },
             365, 100, 294, 74, 21f, bold = true, center = true)
-        art(if (night && todayFlower != null) characterArt(todayFlower) else "morning", 409.6, 181.6, 204.8, 204.8, "마음꽃")
-        val latestSaved = db.entries().firstOrNull { it.id == latestSavedId }
+        art(if (todayFlower != null) characterArt(todayFlower) else "sprout",
+            409.6, 181.6, 204.8, 177, if (todayFlower == null) "씨앗" else todayFlower.flower)
+        if (animateBloom && todayFlower != null) {
+            val character = host.surface.getChildAt(host.surface.childCount - 1)
+            character.alpha = 0f
+            character.scaleX = 0.65f
+            character.scaleY = 0.65f
+            character.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(850).start()
+        }
+        animateBloom = false
+        val latestSaved = records.firstOrNull { it.id == latestSavedId }
         when (speechPhase) {
             SpeechPhase.RECORDING -> {
                 panel(348, 356, 328, 72, "#fff6ec")
                 art("recording_dot", 397, 369, 9.2, 9.2)
-                label("녹음 중", 412, 360, 100, 24, 15f, bold = true)
+                label(if (recordingGoal) "목표 녹음 중" else "녹음 중", 412, 360, 100, 24, 15f, bold = true)
                 art("recording_wave", 528, 361, 98, 22)
                 button("취소", 361, 390, 95, 33, "#f2e8e0") {
                     cancelSpeech()
                     message = ""
                     host.render()
                 }
-                button("일시정지", 463, 390, 200, 33, rose, paper) { handleVoiceControl() }
+                button(if (recordingGoal) "목표 정하기" else "일시정지", 463, 390, 200, 33, rose, paper) { handleVoiceControl() }
             }
             SpeechPhase.STARTING, SpeechPhase.TRANSCRIBING -> {
                 panel(348, 371, 328, 45, "#fff6ec")
@@ -345,7 +380,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     panel(481, 374, 62, 59, "#eaccc4")
                     panel(487, 379, 50, 50, "#a46057")
                     art("mic", 506, 392, 12, 18)
-                    val caption = if (voiceDraft != null) "다시 저장" else "일기 녹음"
+                    val caption = when {
+                        pendingGoalText != null || voiceDraft != null -> "다시 저장"
+                        else -> "일기 녹음"
+                    }
                     panel(452, 431, 120, 24, "#fff5ea")
                     label(caption, 452, 431, 120, 24, 14f, center = true)
                     hit(caption, 451, 373, 122, 82) { handleVoiceControl() }
@@ -376,9 +414,15 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 }
             }
             button("목표 살펴보기", 727, 245, 238, 37, rose, paper) { go("goals") }
-            panel(727, 296, 238, 1, "#e6dbce")
-            label("마음에 어울리는 음악", 727, 303, 238, 30, 15f, bold = true)
-            label("햇살을 닮은 멜로디", 727, 349, 238, 40)
+            button("음성으로 목표 설정", 727, 293, 238, 37) {
+                if (speechPhase == null && voiceDraft == null) {
+                    message = "오늘 이루고 싶은 일을 말해 주세요."
+                    handleVoiceControl(forGoal = true)
+                }
+            }
+            panel(727, 338, 238, 1, "#e6dbce")
+            label("마음에 어울리는 음악", 727, 344, 238, 26, 15f, bold = true)
+            label("햇살을 닮은 멜로디", 727, 371, 238, 33)
             button(if (music == null) "▶ 음악 듣기" else "■ 음악 멈추기",
                 727, 413, 238, 32, "#eadab4") { playMusic() }
         }
@@ -397,7 +441,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
-    private fun handleVoiceControl() {
+    private fun handleVoiceControl(forGoal: Boolean = false) {
         if (speechPhase == SpeechPhase.RECORDING) {
             speechPhase = SpeechPhase.TRANSCRIBING
             message = "음성을 글로 바꿔 저장하고 있어요."
@@ -405,8 +449,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             host.render()
             return
         }
+        pendingGoalText?.let { saveGoalTranscript(it); return }
         voiceDraft?.let { saveVoiceDiary(it); return }
-        if (microphonePermissionPending) return
+        if (microphonePermissionPending || speechPhase != null) return
+        recordingGoal = forGoal
         if (host.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             microphonePermissionPending = true
             host.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 42)
@@ -418,11 +464,14 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     fun permissionResult(granted: Boolean) {
         microphonePermissionPending = false
         if (!host.isJournalVisible || page != "home") return
-        if (granted) startSpeech() else editDiary(null, "마이크 권한 없이 글로 기록할 수 있어요.")
+        if (granted) startSpeech()
+        else if (recordingGoal) msg("목표를 말하려면 마이크 권한을 허용해 주세요.")
+        else editDiary(null, "마이크 권한 없이 글로 기록할 수 있어요.")
     }
 
     private fun startSpeech() {
         val recordedAt = LocalDateTime.now()
+        val forGoal = recordingGoal
         val moment = if (night) "도착" else "출발"
         lateinit var session: DiarySpeech
         session = DiarySpeech(host, object : DiarySpeech.Listener {
@@ -448,6 +497,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     message = error ?: "다시 말해 주세요."
                     if (!host.isJournalVisible || page != "home") msg(message)
                     host.render()
+                } else if (forGoal) {
+                    saveGoalTranscript(text)
                 } else {
                     saveVoiceDiary(VoiceDraft(text, moment, recordedAt))
                 }
@@ -461,11 +512,20 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
+    private fun saveGoalTranscript(text: String) {
+        val saved = db.saveSpokenGoal(text)
+        pendingGoalText = if (saved) null else text
+        latestSavedId = null
+        message = if (saved) "오늘의 목표를 정했어요." else "목표를 저장하지 못했어요. 다시 저장해 주세요."
+        if (!host.isJournalVisible || page != "home") msg(message)
+        host.render()
+    }
+
     private fun saveVoiceDiary(draft: VoiceDraft) {
         val entry = db.add(draft.text, draft.moment, voice = true, recordedAt = draft.recordedAt, id = draft.id)
         voiceDraft = if (entry == null) draft else null
         latestSavedId = entry?.id ?: latestSavedId
-        message = if (entry == null) "홈에서 다시 저장해 주세요." else "일기를 저장했어요."
+        message = if (entry == null) "홈에서 다시 저장해 주세요." else "오늘의 감정은 ${entry.emotion.title}이에요."
         if (!host.isJournalVisible || page != "home") msg(message)
         host.render()
     }
@@ -477,7 +537,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             return
         }
         latestSavedId = entry.id
-        message = "일기를 저장했어요."
+        message = "오늘의 감정은 ${entry.emotion.title}이에요."
         host.render()
     }
 
@@ -500,7 +560,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 if (entry == null) {
                     dialog.dismiss()
                     saveTypedDiary(text)
-                } else if (db.replace(entry.copy(body = text))) {
+                } else if (db.replace(entry.copy(body = text, emotion = Mood.classify(text)))) {
                     dialog.dismiss()
                     host.render()
                 } else msg("수정 내용을 저장하지 못했어요.")
@@ -580,13 +640,20 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun books() {
-        val entriesByMonth = db.entries().filter { it.date.year == month.year }.groupBy { it.date.monthValue }
+        val records = db.entries()
+        val entriesByMonth = records.filter { it.date.year == month.year }.groupBy { it.date.monthValue }
         if (entriesByMonth.isEmpty() && month.year != today.year) {
             art("sprout", 451, 120, 122, 122, "기록을 기다리는 새싹")
             label(month.year.toString(), 350, 255, 324, 49, 36f, bold = true, center = true)
             label("기록 없음", 350, 306, 324, 35, 17f, muted, center = true)
             button("연도 선택", 407, 361, 210, 43) { go("years") }
             return
+        }
+        listOf("오늘 일기" to today, "어제 일기" to today.minusDays(1)).forEachIndexed { index, (title, date) ->
+            val dayEntries = records.filter { it.date == date }
+            if (dayEntries.isNotEmpty()) button(title, 46 + index * 133, 88, 124, 38) {
+                selectDay(dayEntries, "books")
+            }
         }
         button("${month.year} ﹀", 424, 81, 181, 44, paper) { go("years") }
         button("날짜별", 772, 88, 185, 38) {
@@ -605,7 +672,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             panel(x, y, 19, 126, spines[i])
             repeat(4) { ring -> panel(x - 6, y + 19 + ring * 25, 16, 5, paper) }
             val entries = entriesByMonth[m].orEmpty()
-            val coverFlower = entries.firstNotNullOfOrNull { it.mood }
+            val coverFlower = entries.firstOrNull()?.mood
             if (coverFlower != null) art(characterArt(coverFlower), x + 27, y + 8, 94, 84)
             label(if (entries.isEmpty()) "기록 없음" else "${entries.size}편",
                 x + 20, y + 91, 104, 28, 13f, center = true)
@@ -661,7 +728,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             panel(x, y, 289, 99, if (entry == null) "#f1ebe2" else green)
             label("${day}일", x + 14, y + 10, 190, 34, 22f, bold = true)
             label(entry?.summary ?: "기록 없음", x + 14, y + 48, 210, 26, 15f, lines = 1)
-            label(entries.mapNotNull { it.mood?.title }.distinct().joinToString(" · "), x + 14, y + 72, 210, 20, 13f, muted)
+            label(entries.map { it.mood.title }.distinct().joinToString(" · "), x + 14, y + 72, 210, 20, 13f, muted)
             if (entry == null) {
                 val sprout = ImageView(host).apply {
                     setImageDrawable(host.assets.open("sprout.svg").use { PictureDrawable(SVG.getFromInputStream(it).renderToPicture()) })
@@ -671,8 +738,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 }
                 host.surface.place(sprout, x + 222, y + 19, 50, 58)
             } else {
-                val mood = entries.firstNotNullOfOrNull { it.mood }
-                art(mood?.let(::characterArt) ?: "morning", x + 219, y + 12, 63, 66)
+                art(characterArt(entry.mood), x + 219, y + 12, 63, 66)
                 hit("${month.monthValue}월 ${day}일 일기 보기", x, y, 289, 99) { selectDay(entries, "dates") }
             }
         }
@@ -717,8 +783,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         panel(398, 137, 582, 279)
         label(entry.date.format(shortDate), 67, 154, 304, 40, 23f, bold = true)
         val mood = selected.mood
-        art(mood?.let(::characterArt) ?: "morning", 77, 192, 150, 128)
-        label(mood?.let { "${it.title} · ${it.flower}" } ?: "${selected.moment} 일기",
+        art(characterArt(mood), 77, 192, 150, 128)
+        label(selected.flower?.let { "${mood.title} · ${it.flower}" } ?: mood.title,
             230, 220, 148, 55, 17f, bold = true)
         label("하루 속 감정 변화", 65, 308, 295, 23, 15f, bold = true)
         val moodTrack = object : View(host) {
@@ -731,7 +797,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 paint.strokeWidth = 2f
                 canvas.drawLine(step / 2f, y, width - step / 2f, y, paint)
                 dayEntries.forEachIndexed { index, item ->
-                    paint.color = Color.parseColor(item.mood?.color ?: "#c9b9a8")
+                    paint.color = Color.parseColor(item.mood.color)
                     canvas.drawCircle(step * (index + 0.5f), y, if (item.id == selected.id) 7f else 5f, paint)
                 }
             }
@@ -743,7 +809,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                 for (item in dayEntries) {
                     addView(Button(host).apply {
                         text = item.time.format(clockFormat)
-                        contentDescription = "${text} · ${item.mood?.title ?: item.moment} 기록"
+                        contentDescription = "${text} · ${item.mood.title} 기록"
                         isSelected = item.id == selected.id
                         setOnClickListener {
                             detailTimeId = item.id
@@ -866,7 +932,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private fun distribution(entries: List<Diary>): List<Pair<Mood, Int>> {
         val totals = Mood.entries.map { mood ->
             mood to entries.sumOf { entry ->
-                entry.flower?.let { if (it == mood) 1 else 0 } ?: (Mood.scores(entry.body)[mood] ?: 0)
+                if (entry.mood == mood) 1 else 0
             }
         }.filter { it.second > 0 }.sortedByDescending { it.second }
         val sum = totals.sumOf { it.second }
@@ -919,7 +985,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             val left = x + index % 7 * cell + 5
             val top = y + 26 + index / 7 * step
             val records = days[day].orEmpty()
-            val bg = records.firstOrNull()?.mood?.color ?: if (records.isEmpty()) "#f0e9dc" else green
+            val bg = records.firstOrNull()?.mood?.color ?: "#f0e9dc"
             if (records.isEmpty()) {
                 panel(left, top, cell - 10, step - 4, bg)
                 label(day.toString(), left, top, cell - 10, step - 4, 14f, center = true)
@@ -930,7 +996,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun overview() {
-        val entries = db.month(month)
+        val entries = if (page == "recap") db.demoFlowers(month) else db.month(month)
         if (page == "streak") {
             myTabs(0)
             panel(165, 186, 687, 197)
@@ -970,7 +1036,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                         59, 371, 424, 31, 14f, center = true)
                 }
                 button("월별 꽃 전체 보기", 60, 407, 423, 36) { go("bed") }
-                label("감정 비율", 540, 171, 418, 39, 23f, bold = true)
+                label("감정 비율 · 시연 데이터", 540, 171, 418, 39, 23f, bold = true)
                 bars(entries, 541, 217, 417, 33)
             }
             "month_summary" -> {
@@ -1020,7 +1086,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
 
     private fun garden() {
         val entries = db.entries().filter { it.date.year == month.year && it.flower != null }
-        val monthly = entries.filter { it.date.monthValue == month.monthValue }
+        val monthly = db.demoFlowers(month)
         if (page == "flower") {
             button("‹ 돌아가기", 45, 82, 171, 42, paper) { go(flowerBack) }
             panel(45, 140, 339, 305, green)
@@ -1046,7 +1112,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             for (value in 1..12) {
                 val x = 72 + ((value - 1) % 6) * 151
                 val y = 188 + ((value - 1) / 6) * 105
-                val blooms = entries.filter { it.date.monthValue == value }.mapNotNull { it.flower }.distinct()
+                val blooms = db.demoFlowers(month.withMonth(value)).mapNotNull { it.flower }.distinct()
                 blooms.take(3).forEachIndexed { i, bloom ->
                     art("flower${bloom.art}", x + 16 + i * 36, y - 17, 40, 47)
                 }
@@ -1060,7 +1126,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         }
         button("‹ 정원으로", 45, 81, 171, 38, paper) { go("garden") }
         if (page == "bed") {
-            label("${month.monthValue}월", 405, 76, 214, 45, 25f, bold = true, center = true)
+            label("${month.monthValue}월 · 시연 화단", 365, 76, 294, 45, 22f, bold = true, center = true)
             for (value in 1..12) {
                 button("${value}월", 39 + (value - 1) * 79, 129, 73, 34,
                     if (value == month.monthValue) "#536548" else green,

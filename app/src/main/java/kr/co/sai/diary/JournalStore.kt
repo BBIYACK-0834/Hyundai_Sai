@@ -24,6 +24,8 @@ internal enum class Mood(val title: String, val flower: String, val meaning: Str
     }
 
     companion object {
+        fun classify(text: String): Mood = scores(text).maxByOrNull { it.value }?.key ?: CALM
+
         fun scores(text: String): Map<Mood, Int> = entries.associateWith { mood ->
             mood.words.sumOf { word -> Regex(Regex.escape(word)).findAll(text).count() }
         }.filterValues { it > 0 }
@@ -32,10 +34,11 @@ internal enum class Mood(val title: String, val flower: String, val meaning: Str
 
 internal data class Diary(
     val id: String, val date: LocalDate, val time: LocalTime, val body: String,
-    val moment: String, val voice: Boolean, val flower: Mood?
+    val moment: String, val voice: Boolean, val flower: Mood?,
+    val emotion: Mood = Mood.classify(body)
 ) {
     val summary get() = body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(70)
-    val mood get() = flower ?: Mood.scores(body).maxByOrNull { it.value }?.key
+    val mood get() = flower ?: emotion
 }
 
 internal class JournalStore(context: Context) {
@@ -48,7 +51,9 @@ internal class JournalStore(context: Context) {
             Diary(entry.getString("id"), LocalDate.parse(entry.getString("date")),
                 LocalTime.parse(entry.getString("time")), entry.getString("body"),
                 entry.getString("moment"), entry.optBoolean("voice"),
-                Mood.entries.find { it.name == entry.optString("flower") })
+                Mood.entries.find { it.name == entry.optString("flower") },
+                Mood.entries.find { it.name == entry.optString("emotion") }
+                    ?: Mood.classify(entry.getString("body")))
         }.sortedWith(compareByDescending<Diary> { it.date }.thenByDescending { it.time })
     }
 
@@ -58,7 +63,7 @@ internal class JournalStore(context: Context) {
             array.put(JSONObject().put("id", entry.id).put("date", entry.date.toString())
                 .put("time", entry.time.toString()).put("body", entry.body)
                 .put("moment", entry.moment).put("voice", entry.voice)
-                .put("flower", entry.flower?.name))
+                .put("flower", entry.flower?.name).put("emotion", entry.emotion.name))
         }
         return prefs.edit().putString("entries", array.toString()).commit()
     }
@@ -85,6 +90,41 @@ internal class JournalStore(context: Context) {
             cursor = cursor.minusDays(1)
         }
         return count
+    }
+
+    fun seedYesterday(today: LocalDate = LocalDate.now()): Boolean {
+        if (prefs.getBoolean("demo_yesterday_seeded", false)) return true
+        val yesterday = today.minusDays(1)
+        if (entries().none { it.date == yesterday } && add(
+                "퇴근길에 노을을 보니 마음이 편안해졌어요. 좋아하는 음악을 들으며 천천히 집에 왔어요.",
+                "시연 예시", voice = false, recordedAt = yesterday.atTime(18, 40), id = "demo-yesterday"
+            ) == null) return false
+        return prefs.edit().putBoolean("demo_yesterday_seeded", true).commit()
+    }
+
+    fun bloomToday(today: LocalDate = LocalDate.now(), preferredId: String? = null): Boolean {
+        val records = entries().filter { it.date == today && it.id != "demo-yesterday" }
+        val entry = records.firstOrNull { it.id == preferredId } ?: records.firstOrNull() ?: return true
+        return entry.flower != null || replace(entry.copy(flower = entry.emotion))
+    }
+
+    fun saveSpokenGoal(text: String): Boolean {
+        val goal = when {
+            Regex("운동|헬스|산책|걷|달리|스트레칭").containsMatchIn(text) -> "오늘 10분 몸 움직이기"
+            Regex("공부|시험|과제|책|독서").containsMatchIn(text) -> "오늘 집중해서 20분 공부하기"
+            Regex("휴식|쉬|피곤|힘들|여유|긴장|걱정").containsMatchIn(text) -> "잠깐 멈춰 깊게 숨 세 번 고르기"
+            Regex("감사|고마|행복").containsMatchIn(text) -> "오늘 고마웠던 순간 하나 남기기"
+            else -> text.lineSequence().first { it.isNotBlank() }.trim().take(45)
+        }
+        return saveGoal(listOf(goal), 1)
+    }
+
+    fun demoFlowers(month: YearMonth): List<Diary> = listOf(
+        Mood.CALM, Mood.TIRED, Mood.WORRY, Mood.CALM, Mood.JOY, Mood.EXCITED,
+        Mood.WORRY, Mood.CALM, Mood.JOY, Mood.WORRY
+    ).mapIndexed { index, mood ->
+        Diary("demo-flower-$index", month.atDay(index + 1), LocalTime.of(18, 30),
+            "", "시연 예시", false, mood, mood)
     }
 
     fun tasks(default: String) = prefs.getString("tasks", null)?.split("\n") ?: listOf(default)

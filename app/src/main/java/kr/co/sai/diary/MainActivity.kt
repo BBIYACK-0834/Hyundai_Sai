@@ -199,7 +199,7 @@ class MainActivity : Activity() {
     }
 
     private fun plant() {
-        if (store.plant()) { screen = "weather"; render() }
+        if (journal.prepareDemoDay() && store.startDay()) weatherScreenSaved()
         else Toast.makeText(this, "씨앗을 저장하지 못했어요.", Toast.LENGTH_LONG).show()
     }
 
