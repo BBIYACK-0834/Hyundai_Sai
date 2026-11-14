@@ -114,7 +114,7 @@ internal class JournalStore(context: Context) {
         if (prefs.getBoolean("demo_yesterday_seeded", false)) return true
         val yesterday = today.minusDays(1)
         if (entries().none { it.date == yesterday } && add(
-                "퇴근길에 노을을 보니 마음이 편안해졌어요. 좋아하는 음악을 들으며 천천히 집에 왔어요.",
+                "퇴근길에 노을을 보니 마음이 편안해졌어요. 바쁘게 흘러간 하루 끝에 좋아하는 음악을 들으며 천천히 집에 오는 시간이 작은 쉼이 되었어요.\n\n아침에는 처리할 일이 많아 서둘러 출근했어요. 오전에 막혔던 일을 동료와 함께 정리하고, 점심에는 따뜻한 밥을 먹으며 잠깐 일상 이야기를 나눴어요. 오후에는 미뤄두었던 작업을 하나 마무리해서 한결 홀가분했어요.\n\n신호를 기다리며 창밖을 보니 하늘이 주황빛으로 물들어 있었어요. 늘 지나던 길인데 오늘은 가로수와 거리의 불빛이 유난히 눈에 들어왔어요. 차 안에서 잠시 숨을 고르니 복잡했던 생각도 차분해졌어요.\n\n집에 도착하면 따뜻한 물로 씻고 저녁을 챙겨 먹으려고 해요. 오늘 할 일을 모두 끝내지는 못했지만, 애쓴 나에게 이 정도면 잘했다고 말해주고 싶어요. 내일 아침에는 조금 일찍 나와 여유 있게 하루를 시작해봐야겠어요.",
                 "시연 예시", voice = false, recordedAt = yesterday.atTime(18, 40), id = "demo-yesterday"
             ) == null) return false
         return prefs.edit().putBoolean("demo_yesterday_seeded", true).commit()
