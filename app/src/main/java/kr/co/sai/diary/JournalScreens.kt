@@ -1078,8 +1078,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         listOf("출발할 때 한 문장 남기기", "고마웠던 순간 떠올리기", "도착하면 일기 남기기")
     )
 
-    private fun distribution(entries: List<Diary>): List<Pair<Mood, Int>> {
-        val totals = entries.groupingBy { it.emotion }.eachCount().toList()
+    private fun distribution(moods: List<Mood>): List<Pair<Mood, Int>> {
+        val totals = moods.groupingBy { it }.eachCount().toList()
             .sortedWith(compareByDescending<Pair<Mood, Int>> { it.second }.thenBy { it.first.ordinal })
         val sum = totals.sumOf { it.second }
         if (sum == 0) return emptyList()
@@ -1092,7 +1092,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun bars(entries: List<Diary>, x: Int, y: Int, w: Int, step: Int, limit: Int = 6) {
-        val scores = distribution(entries)
+        drawBars(distribution(entries.map { it.emotion }), x, y, w, step, limit)
+    }
+
+    private fun drawBars(scores: List<Pair<Mood, Int>>, x: Int, y: Int, w: Int, step: Int, limit: Int = 6) {
         if (scores.isEmpty()) {
             label("감정이 기록되면 여기에 표시돼요.", x, y, w, 37, 14f, muted)
             return
@@ -1142,7 +1145,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun overview() {
-        val entries = if (page == "recap") db.demoFlowers(month) else db.month(month)
+        val entries = db.month(month)
         if (page == "streak") {
             myTabs(0)
             panel(165, 186, 687, 197)
@@ -1161,29 +1164,35 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             return
         }
         val flowers = entries.filter { it.flower != null }
-        val top = distribution(entries).firstOrNull()
+        val top = if (page == "recap") null else distribution(entries.map { it.emotion }).firstOrNull()
         monthTitle()
         if (page != "month_summary") myTabs(if (page == "recap") 1 else 0)
         when (page) {
             "recap" -> {
+                val earned = flowers.filterNot { it.isDemo }
+                val samples = db.demoFlowers(month)
+                val recapFlowers = earned + samples
+                val moods = recapFlowers.mapNotNull { it.flower }
                 panel(38, 155, 465, 294)
                 panel(519, 155, 467, 294)
                 label("${month.monthValue}월 꽃다발", 59, 169, 424, 41, 23f, bold = true)
-                if (flowers.isEmpty()) label("이달에 피어난 꽃이 없어요.", 58, 218, 424, 137, 18f, center = true)
+                label("내 꽃 ${earned.size}송이 · 시연 ${samples.size}송이",
+                    223, 173, 253, 33, 14f, muted, center = true)
+                if (recapFlowers.isEmpty()) label("이달에 피어난 꽃이 없어요.", 58, 218, 424, 137, 18f, center = true)
                 else {
-                    val bouquet = flowers.groupingBy { it.flower!! }.eachCount().entries.sortedByDescending { it.value }
+                    val bouquet = moods.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
                     bouquet.forEachIndexed { index, (mood, count) ->
                         val x = 101 + (index % 3) * 116
                         val y = 214 + (index / 3) * 72
                         art("flower${mood.art}", x, y, 86, 62, mood.flower)
                         label("${count}송이", x + 56, y + 34, 57, 24, 13f, muted)
                     }
-                    label("이달에 ${flowers.map { it.date }.distinct().size}일 동안 꽃을 피웠어요.",
+                    label("꽃이 피어난 날 ${recapFlowers.map { it.date }.distinct().size}일",
                         59, 371, 424, 31, 14f, center = true)
                 }
                 button("내 정원 보기", 60, 407, 423, 36) { go("garden") }
-                label("감정 비율 · 시연 데이터", 540, 171, 418, 39, 23f, bold = true)
-                bars(entries, 541, 217, 417, 33)
+                label("꽃으로 본 감정 비율", 540, 171, 418, 39, 23f, bold = true)
+                drawBars(distribution(moods), 541, 217, 417, 33)
             }
             "month_summary" -> {
                 button("‹ 마이페이지", 38, 82, 194, 34) { go("summary") }
@@ -1305,7 +1314,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         }
         flowerViews.forEach { (view, _, _) -> field.addView(view, FrameLayout.LayoutParams(0, 0)) }
         val scroll = ScrollView(host).apply {
-            addView(field, ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT))
+            addView(field, FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         host.surface.place(scroll, 107, 178, 810, 239)
     }

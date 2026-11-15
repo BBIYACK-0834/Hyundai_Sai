@@ -99,6 +99,27 @@ class ProfileFlowTest {
         assertTrue(reopened.clear()); assertFalse(reopened.hasProfile()); assertFalse(reopened.plantedToday())
         assertEquals(Profile(), reopened.load()); assertEquals("낮 맑음", reopened.weather())
     }
+    @Test fun recapCombinesEarnedAndSampleFlowersWithoutAddingSamplesToGarden() {
+        ProfileStore(context).apply { save(Profile()); plant() }
+        val db = JournalStore(context)
+        val now = LocalDateTime.now()
+        val entry = checkNotNull(db.add("오늘은 너무 슬펐어요.", "도착", false, now))
+        assertTrue(db.bloomToday(now.toLocalDate(), entry.id))
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "마이페이지" }.performClick()
+                click(activity, "리캡")
+                fun shows(text: String) = descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString() == text }
+                assertTrue(shows("내 꽃 1송이 · 시연 18송이"))
+                assertTrue(shows("3송이")) // Two sample flowers and one earned flower for sadness.
+                click(activity, "내 정원 보기")
+                assertTrue(shows("1송이"))
+            }
+        }
+    }
+
     @Test fun gardenShowsEarnedFlowersAcrossMonthsAndYears() {
         ProfileStore(context).apply { save(Profile()); plant() }
         val db = JournalStore(context)

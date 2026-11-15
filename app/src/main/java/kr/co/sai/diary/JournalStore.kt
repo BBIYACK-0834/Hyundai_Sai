@@ -193,12 +193,20 @@ internal class JournalStore(context: Context) {
             .putString("morning_goal_date", date.toString()).commit()
     }
 
-    fun demoFlowers(month: YearMonth): List<Diary> = listOf(
-        Mood.CALM, Mood.TIRED, Mood.WORRY, Mood.CALM, Mood.JOY, Mood.EXCITED,
-        Mood.WORRY, Mood.CALM, Mood.JOY, Mood.WORRY
-    ).mapIndexed { index, mood ->
-        Diary("demo-flower-$index", month.atDay(index + 1), LocalTime.of(18, 30),
-            "", "시연 예시", false, mood, mood)
+    fun demoFlowers(month: YearMonth, today: LocalDate = LocalDate.now()): List<Diary> {
+        val currentMonth = YearMonth.from(today)
+        if (month > currentMonth) return emptyList()
+        val days = if (month == currentMonth) today.dayOfMonth else month.lengthOfMonth()
+        val moods = listOf(
+            Mood.CALM, Mood.TIRED, Mood.WORRY, Mood.CALM, Mood.JOY, Mood.EXCITED,
+            Mood.WORRY, Mood.CALM, Mood.JOY, Mood.WORRY, Mood.SAD, Mood.JOY,
+            Mood.EXCITED, Mood.TIRED, Mood.CALM, Mood.SAD, Mood.CALM, Mood.JOY
+        )
+        return moods.mapIndexed { index, mood ->
+            val day = 1 + index * (days - 1) / (moods.size - 1)
+            Diary("demo-flower-$month-$index", month.atDay(day), LocalTime.of(18, 30),
+                "", "시연 예시", false, mood, mood)
+        }
     }
 
     private fun legacyMorningAnswer(): String? {
