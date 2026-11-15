@@ -154,8 +154,38 @@ internal class JournalStore(context: Context) {
             .putBoolean("demo_day_v2_seeded", true).commit()
     }
 
+    fun prepareDemoRecords(today: LocalDate): Boolean = seedYesterday(today) && seedDemoCalendar()
+
     fun upgradeExistingDemo(): Boolean =
-        !prefs.getBoolean("demo_yesterday_seeded", false) || seedYesterday()
+        !prefs.getBoolean("demo_yesterday_seeded", false) ||
+            (seedYesterday() && seedDemoCalendar())
+
+    private fun seedDemoCalendar(): Boolean {
+        val key = "demo_calendar_seeded"
+        if (prefs.getBoolean(key, false)) return true
+        val records = entries()
+        val existingIds = records.map { it.id }.toSet()
+        val additions = demoCalendarEntries().filterNot { it.id in existingIds }
+        if (additions.isNotEmpty() && !save(records + additions)) return false
+        return prefs.edit().putBoolean(key, true).commit()
+    }
+
+    private fun demoCalendarEntries(): List<Diary> {
+        fun sample(month: Int, day: Int, hour: Int, body: String, moment: String, flower: Mood? = null): Diary {
+            val date = LocalDate.of(2026, month, day)
+            return Diary("demo-$date-$hour", date, LocalTime.of(hour, 30), body, "시연 예시 · $moment", false, flower)
+        }
+        return listOf(
+            sample(11, 14, 9, "주말 아침에 친구를 만나러 차를 탔어요. 오랜만에 만날 생각에 마음이 설렜어요.", "출발"),
+            sample(11, 14, 13, "친구와 점심을 먹고 한참 이야기를 나눴어요. 요즘 잘 지내냐고 먼저 물어봐 줘서 고마웠어요.", "점심"),
+            sample(11, 14, 18, "돌아오는 길에 좋아하는 노래를 틀었어요. 창밖의 노을을 보니 마음이 차분해졌어요.", "귀가", Mood.CALM),
+            sample(10, 3, 10, "가족과 교외로 나들이를 갔어요. 창문을 여니 가을바람이 불어서 기분이 좋았어요.", "나들이", Mood.JOY),
+            sample(10, 9, 18, "비가 많이 오는 퇴근길이었어요. 낯선 길로 돌아가야 해서 조금 불안했어요.", "퇴근", Mood.WORRY),
+            sample(10, 16, 19, "늦게까지 일을 마치고 주차장에 도착했어요. 하루 종일 서 있었더니 녹초가 됐어요.", "퇴근", Mood.TIRED),
+            sample(10, 23, 17, "오랜만에 친구와 전시를 보기로 했어요. 만나러 가는 길부터 마음이 설렜어요.", "약속", Mood.EXCITED),
+            sample(10, 30, 18, "집에 가는 길에 단풍이 물든 가로수길을 지났어요. 차 안에서 잠시 숨을 고르니 한결 편안해졌어요.", "귀가", Mood.CALM)
+        )
+    }
 
     private fun demoDayEntries(date: LocalDate): List<Diary> = listOf(
         Diary("demo-nov13-morning", date, LocalTime.of(8, 30),

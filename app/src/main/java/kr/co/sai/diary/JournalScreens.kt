@@ -133,7 +133,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         if (!db.upgradeExistingDemo()) message = "예시 기록을 갱신하지 못했어요. 앱을 다시 열어주세요."
     }
 
-    fun prepareDemoDay() = db.seedYesterday(today)
+    fun prepareDemoDay() = db.prepareDemoRecords(today)
 
     fun clear(): Boolean {
         cancelSpeech()
@@ -741,8 +741,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             button("연도 선택", 407, 361, 210, 43) { go("years") }
             return
         }
+        val originalDemoDate = records.firstOrNull { it.id == "demo-yesterday" }?.date
+        val demoDate = originalDemoDate ?: records.firstOrNull { it.isDemo }?.date
         val shortcuts = listOf("오늘 일기" to today, "어제 일기" to today.minusDays(1)) +
-            records.firstOrNull { it.isDemo }?.let { listOf("시연 일기" to it.date) }.orEmpty()
+            demoDate?.let { listOf("시연 일기" to it) }.orEmpty()
         shortcuts.forEachIndexed { index, (title, date) ->
             val dayEntries = records.filter { it.date == date }
             if (dayEntries.isNotEmpty()) button(title, 46 + index * 121, 88, 110, 38) {

@@ -188,7 +188,7 @@ class ProfileFlowTest {
                 assertEquals("낮 맑음", ProfileStore(context).weather())
                 assertTrue(db.entries().all { it.isDemo })
                 assertTrue(db.seedYesterday())
-                assertEquals(3, db.entries().size)
+                assertEquals(11, db.entries().size)
                 assertTrue(db.saveSpokenGoal("오늘은 퇴근 후에 산책하고 싶어요."))
                 assertEquals(listOf("오늘은 퇴근 후에 산책하고 싶어요."), db.tasks(""))
                 val entry = checkNotNull(db.add("오늘 기쁘고 즐거운 일이 있었어요.", "출발", true))
@@ -196,7 +196,7 @@ class ProfileFlowTest {
                 assertNull(entry.flower)
                 click(activity, "밤으로 전환")
                 assertEquals("밤 맑음", ProfileStore(context).weather())
-                assertEquals(Mood.JOY, db.entries().first().flower)
+                assertEquals(Mood.JOY, db.entries().single { it.id == entry.id }.flower)
                 assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
                     .any { it.text.toString() == "꽃말   새로운 시작" })
                 descendants(activity.window.decorView).filterIsInstance<Button>()
@@ -207,7 +207,7 @@ class ProfileFlowTest {
             }
             scenario.recreate()
             assertEquals("밤 맑음", ProfileStore(context).weather())
-            assertEquals(4, db.entries().size)
+            assertEquals(12, db.entries().size)
         }
     }
     @Test fun voiceEntryKeepsRecordingDateAndAppearsInRecordsAfterRestart() {
@@ -305,17 +305,24 @@ class ProfileFlowTest {
             .putBoolean("demo_yesterday_seeded", true).commit()
         assertTrue(db.upgradeExistingDemo())
         assertEquals(edited, db.entries().single { it.id == edited.id })
-        assertEquals(3, db.entries().size)
+        assertEquals(3, db.entries().count { it.date == date })
         assertTrue(db.seedYesterday())
-        assertEquals(3, db.entries().size)
+        assertEquals(3, db.entries().count { it.date == date })
+        val addedDate = java.time.LocalDate.of(2026, 11, 14)
+        val october = db.month(java.time.YearMonth.of(2026, 10))
+        assertEquals(5, october.map { it.date }.distinct().size)
+        assertTrue(october.all { it.isDemo })
+        assertEquals(3, db.entries().count { it.date == addedDate })
+        assertTrue(db.delete("demo-$addedDate-9"))
         assertTrue(db.delete("demo-nov13-morning"))
         assertTrue(db.upgradeExistingDemo())
-        assertEquals(2, db.entries().size)
+        assertEquals(2, db.entries().count { it.date == date })
+        assertEquals(2, db.entries().count { it.date == addedDate })
         assertTrue(db.clear())
         context.getSharedPreferences("sai_journal", Context.MODE_PRIVATE).edit()
             .putBoolean("demo_yesterday_seeded", true).commit()
         assertTrue(db.upgradeExistingDemo())
-        assertTrue(db.entries().isEmpty())
+        assertTrue(db.entries().none { it.date == date })
     }
 
     @Test fun oldDiaryLoadsWithoutTagsAndExplicitEmptyTagsPersist() {
@@ -342,11 +349,10 @@ class ProfileFlowTest {
             scenario.onActivity { a ->
                 descendants(a.window.decorView).filterIsInstance<Button>()
                     .single { it.contentDescription == "기록" }.performClick()
-                // Three recordings on November 13 are one daily diary.
-                assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
-                    .any { it.text.toString() == "1편" })
-                assertFalse(descendants(a.window.decorView).filterIsInstance<TextView>()
-                    .any { it.text.toString() == "3편" })
+                // November 13 and 14 are each counted once despite multiple recordings.
+                val books = descendants(a.window.decorView)
+                assertTrue(books.filterIsInstance<TextView>().any { it.text.toString() == "2편" })
+                assertTrue(books.filterIsInstance<TextView>().any { it.text.toString() == "5편" })
                 click(a, "시연 일기")
                 fun shows(text: String) = descendants(a.window.decorView).filterIsInstance<TextView>()
                     .any { it.text.toString().contains(text) }
