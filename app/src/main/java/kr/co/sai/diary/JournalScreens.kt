@@ -817,7 +817,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             panel(x, y, 289, 99, if (entry == null) "#f1ebe2" else green)
             label("${day}일", x + 14, y + 10, 190, 34, 22f, bold = true)
             label(entry?.summary ?: "기록 없음", x + 14, y + 48, 210, 26, 15f, lines = 1)
-            label(entries.map { it.mood.title }.distinct().joinToString(" · "), x + 14, y + 72, 210, 20, 13f, muted)
+            label(entries.map { it.emotion.title }.distinct().joinToString(" · "), x + 14, y + 72, 210, 20, 13f, muted)
             if (entry == null) {
                 val sprout = ImageView(host).apply {
                     setImageDrawable(host.assets.open("sprout.svg").use { PictureDrawable(SVG.getFromInputStream(it).renderToPicture()) })
@@ -876,9 +876,6 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         label(entry.date.format(shortDate), 62, 154, 227, 40, 22f, bold = true, center = true)
         val dailyMood = representativeEmotion(dayEntries)
         val classifiedMood = if (detailTab == 0) dailyMood else selected?.emotion
-        val classifiedText = if (detailTab == 0) dayEntries.joinToString(" ") { it.body }
-            else selected?.body.orEmpty()
-        val keywords = classifiedMood?.words.orEmpty().filter { classifiedText.contains(it) }.take(3)
 
         // One flower represents the whole day, independently of the selected time or tab.
         art(characterArt(dailyMood), 60, 211, 122, 132, "하루 대표 꽃: ${dailyMood.flower}")
@@ -886,13 +883,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         label(dailyMood.flower, 60, 365, 122, 23, 15f, bold = true, center = true)
         panel(185, 213, 1, 170, "#dcd2bd")
 
-        label("키워드 분류", 194, 211, 99, 23, 13f, bold = true)
+        label("감정", 194, 211, 99, 23, 13f, bold = true)
         label(if (detailTab == 0) "하루 전체" else selected?.time?.format(clockFormat) ?: "기록 없음",
             194, 237, 99, 20, 12f, muted)
         label(classifiedMood?.title ?: "—", 194, 260, 99, 31, 21f, bold = true)
-        label("근거 키워드", 194, 299, 99, 21, 11f, muted)
-        label(keywords.joinToString("\n").ifBlank { "일치 없음" }, 194, 322, 99, 59,
-            13f, lines = 3).contentDescription = "분류 키워드: ${keywords.joinToString(", ").ifBlank { "일치 없음" }}"
         label(if (detailTab == 0) "${dailyMood.title} · ${dayEntries.size}개의 기록"
             else "하루 대표 감정 · ${dailyMood.title}", 61, 394, 228, 19, 12f, muted, center = true)
 
@@ -966,8 +960,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             val active = item.id == selected?.id
             val chip = Button(host).apply {
                 val timeText = item.time.format(clockFormat)
-                text = "$timeText · ${item.mood.title}"
-                contentDescription = "$timeText · ${item.mood.title} 기록"
+                text = "$timeText · ${item.emotion.title}"
+                contentDescription = "$timeText · ${item.emotion.title} 기록"
                 isSelected = active
                 isAllCaps = false
                 minWidth = 0
@@ -1080,7 +1074,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     )
 
     private fun distribution(entries: List<Diary>): List<Pair<Mood, Int>> {
-        val totals = entries.groupingBy { it.mood }.eachCount().toList()
+        val totals = entries.groupingBy { it.emotion }.eachCount().toList()
             .sortedWith(compareByDescending<Pair<Mood, Int>> { it.second }.thenBy { it.first.ordinal })
         val sum = totals.sumOf { it.second }
         if (sum == 0) return emptyList()

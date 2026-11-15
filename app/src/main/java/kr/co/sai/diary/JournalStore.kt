@@ -24,11 +24,8 @@ internal enum class Mood(val title: String, val flower: String, val meaning: Str
     }
 
     companion object {
-        fun classify(text: String): Mood = scores(text).maxByOrNull { it.value }?.key ?: CALM
-
-        fun scores(text: String): Map<Mood, Int> = entries.associateWith { mood ->
-            mood.words.sumOf { word -> Regex(Regex.escape(word)).findAll(text).count() }
-        }.filterValues { it > 0 }
+        fun classify(text: String): Mood = EmotionClassifier.classify(text)
+        fun scores(text: String): Map<Mood, Int> = EmotionClassifier.scores(text)
     }
 }
 
@@ -84,8 +81,7 @@ internal class JournalStore(context: Context) {
                 LocalTime.parse(entry.getString("time")), entry.getString("body"),
                 entry.getString("moment"), entry.optBoolean("voice"),
                 Mood.entries.find { it.name == entry.optString("flower") },
-                Mood.entries.find { it.name == entry.optString("emotion") }
-                    ?: Mood.classify(entry.getString("body")),
+                Mood.classify(entry.getString("body")),
                 entry.optJSONArray("tags")?.let { tags ->
                     normalizeDiaryTags((0 until tags.length()).joinToString(",") { tags.getString(it) })
                 } ?: suggestDiaryTags(entry.getString("body")))
@@ -115,7 +111,11 @@ internal class JournalStore(context: Context) {
         return entry.takeIf { save(entries().filterNot { it.id == id } + entry) }
     }
 
-    fun replace(entry: Diary) = save(entries().map { if (it.id == entry.id) entry else it })
+    fun replace(entry: Diary): Boolean {
+        val mood = Mood.classify(entry.body)
+        val updated = entry.copy(emotion = mood)
+        return save(entries().map { if (it.id == entry.id) updated else it })
+    }
     fun delete(id: String) = save(entries().filterNot { it.id == id })
     fun month(month: YearMonth) = entries().filter { YearMonth.from(it.date) == month }
     fun streak(): Int {
