@@ -210,6 +210,21 @@ class ProfileFlowTest {
             assertEquals(12, db.entries().size)
         }
     }
+    @Test fun speechTrimmingKeepsQuietSyllablesAndPausesNearSpeech() {
+        val audio = ShortArray(32_000)
+        audio[100] = 500 // A single input click is not a speech frame.
+        audio.fill(45, 9_000, 10_000)
+        audio.fill(640, 10_000, 12_000)
+        audio.fill(700, 14_000, 16_000)
+        audio.fill(45, 16_000, 17_000)
+        val trimmed = DiarySpeech.trimQuietEdges(audio)
+        assertTrue(trimmed.size < audio.size)
+        assertTrue(trimmed.contains(45.toShort()))
+        assertTrue(trimmed.contains(700.toShort()))
+        assertFalse(trimmed.contains(500.toShort()))
+        assertTrue(DiarySpeech.trimQuietEdges(ShortArray(16_000)).isEmpty())
+    }
+
     @Test fun voiceEntryKeepsRecordingDateAndAppearsInRecordsAfterRestart() {
         ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
         val recordedAt = LocalDateTime.now().withHour(23).withMinute(59).withSecond(0).withNano(0)

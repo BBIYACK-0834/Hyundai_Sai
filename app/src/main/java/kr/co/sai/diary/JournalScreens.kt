@@ -425,7 +425,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             }
             SpeechPhase.STARTING, SpeechPhase.TRANSCRIBING -> {
                 panel(348, 371, 328, 45, "#fff6ec")
-                label(if (speechPhase == SpeechPhase.STARTING) "마이크 준비 중…" else "텍스트 저장 중…",
+                label(if (speechPhase == SpeechPhase.STARTING) "마이크 준비 중…" else "음성 인식 중…",
                     348, 371, 328, 45, 15f, center = true)
             }
             null -> {
@@ -509,7 +509,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private fun handleVoiceControl(forGoal: Boolean = false) {
         if (speechPhase == SpeechPhase.RECORDING) {
             speechPhase = SpeechPhase.TRANSCRIBING
-            message = "음성을 글로 바꿔 저장하고 있어요."
+            message = "음성을 글로 바꾸고 있어요."
             speech?.finish()
             host.render()
             return
@@ -550,7 +550,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             override fun onTranscribing() = host.runOnUiThread {
                 if (speech !== session) return@runOnUiThread
                 speechPhase = SpeechPhase.TRANSCRIBING
-                message = "음성을 글로 바꿔 저장하고 있어요."
+                message = "음성을 글로 바꾸고 있어요."
                 host.render()
             }
 
@@ -563,7 +563,9 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     if (!host.isJournalVisible || page != "home") msg(message)
                     host.render()
                 } else if (forGoal) {
-                    saveGoalTranscript(text, recordedAt.toLocalDate())
+                    message = ""
+                    host.render()
+                    editGoalAnswer(text, recordedAt.toLocalDate())
                 } else {
                     saveVoiceDiary(VoiceDraft(text, moment, recordedAt))
                 }
@@ -577,21 +579,25 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         host.render()
     }
 
-    private fun editGoalAnswer() {
+    private fun editGoalAnswer(transcript: String? = null, date: LocalDate = today) {
         val input = EditText(host).apply {
             hint = "예: 오늘은 퇴근 후 20분 산책하고 싶어요"
             contentDescription = "첫 질문의 목표 답변"
             maxLines = 4
             filters = arrayOf(InputFilter.LengthFilter(1200))
+            setText(transcript.orEmpty())
         }
-        val dialog = AlertDialog.Builder(host).setTitle("오늘 이루고 싶은 목표는 무엇인가요?")
-            .setView(input).setNegativeButton("취소", null).setPositiveButton("목표로 저장", null).create()
+        val builder = AlertDialog.Builder(host)
+            .setTitle(if (transcript == null) "오늘 이루고 싶은 목표는 무엇인가요?" else "인식한 목표 확인")
+            .setView(input).setNegativeButton("취소", null).setPositiveButton("목표로 저장", null)
+        if (transcript != null) builder.setNeutralButton("다시 말하기") { _, _ -> handleVoiceControl(forGoal = true) }
+        val dialog = builder.create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val answer = input.text.toString().trim()
                 if (answer.isBlank()) { input.error = "목표를 입력해 주세요."; return@setOnClickListener }
                 dialog.dismiss()
-                saveGoalTranscript(answer)
+                saveGoalTranscript(answer, date)
             }
         }
         dialog.show()

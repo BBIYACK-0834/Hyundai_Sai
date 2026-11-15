@@ -29,7 +29,7 @@ android {
             version = "3.22.1"
         }
     }
-    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/sai-speech"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/sai-speech-small"))
     androidResources { noCompress += "bin" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -46,9 +46,9 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
 
-val modelFile = layout.buildDirectory.file("generated/sai-speech/speech/ggml-tiny-q5_1.bin")
-val modelLicense = layout.buildDirectory.file("generated/sai-speech/speech/LICENSE-whisper.txt")
-val modelHash = "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"
+val modelFile = layout.buildDirectory.file("generated/sai-speech-small/speech/ggml-small-q5_1.bin")
+val modelLicense = layout.buildDirectory.file("generated/sai-speech-small/speech/LICENSE-whisper.txt")
+val modelHash = "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb"
 val localModel = providers.gradleProperty("saiSpeechModel").map { file(it) }
 val licenseFile = layout.projectDirectory.file("src/main/cpp/LICENSE-whisper.txt")
 val prepareSpeechModel = tasks.register("prepareSpeechModel") {
@@ -62,14 +62,22 @@ val prepareSpeechModel = tasks.register("prepareSpeechModel") {
         val staged = temporaryDir.resolve(target.name).toPath()
         try {
             val input = localModel.orNull?.inputStream()
-                ?: URI("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin")
+                ?: URI("https://huggingface.co/ggerganov/whisper.cpp/resolve/3e251d613ae82c33b1dcca9f0406c697c3f9d083/ggml-small-q5_1.bin")
                     .toURL().openConnection().apply {
                         connectTimeout = 30_000
                         readTimeout = 120_000
                     }.getInputStream()
             input.use { Files.copy(it, staged, StandardCopyOption.REPLACE_EXISTING) }
-            val digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(staged))
-                .joinToString("") { "%02x".format(it) }
+            val sha256 = MessageDigest.getInstance("SHA-256")
+            Files.newInputStream(staged).use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count == -1) break
+                    sha256.update(buffer, 0, count)
+                }
+            }
+            val digest = sha256.digest().joinToString("") { "%02x".format(it) }
             check(digest == modelHash) { "Whisper model SHA-256 does not match." }
             Files.move(staged, target.toPath(), StandardCopyOption.REPLACE_EXISTING)
             licenseFile.asFile.copyTo(modelLicense.get().asFile, overwrite = true)

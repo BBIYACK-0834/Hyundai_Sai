@@ -20,7 +20,7 @@ final class DiarySpeech {
     private static final Executor EXECUTOR = Executors.newSingleThreadExecutor();
     private static final int SAMPLE_RATE = 16_000;
     private static final int MAX_SAMPLES = SAMPLE_RATE * 60;
-    private static final String MODEL_FILE = "ggml-tiny-q5_1.bin";
+    private static final String MODEL_FILE = "ggml-small-q5_1.bin";
 
     interface Listener {
         void onRecording();
@@ -59,9 +59,9 @@ final class DiarySpeech {
     private void recordAndTranscribe() {
         try {
             if (cancelled) return;
-            short[] audio = recordAudio();
+            short[] audio = trimQuietEdges(recordAudio());
             if (cancelled) return;
-            if (audio.length < SAMPLE_RATE / 4 || !containsSignal(audio)) {
+            if (audio.length < SAMPLE_RATE / 4) {
                 listener.onResult(null, "들린 음성이 없어요. 마이크 입력을 확인하고 다시 말해 주세요.");
                 return;
             }
@@ -125,11 +125,25 @@ final class DiarySpeech {
         return Arrays.copyOf(samples, size);
     }
 
-    private static boolean containsSignal(short[] samples) {
-        for (short sample : samples) {
-            if (Math.abs((int) sample) >= 64) return true;
+    static short[] trimQuietEdges(short[] samples) {
+        final int frameSize = SAMPLE_RATE / 50; // 20 ms
+        final int padding = SAMPLE_RATE / 4;
+        int first = -1;
+        int end = 0;
+        for (int offset = 0; offset < samples.length; offset += frameSize) {
+            int limit = Math.min(offset + frameSize, samples.length);
+            long energy = 0;
+            for (int i = offset; i < limit; i++) {
+                int value = samples[i];
+                energy += value * value;
+            }
+            if (energy >= 64L * 64 * (limit - offset)) {
+                if (first < 0) first = offset;
+                end = limit;
+            }
         }
-        return false;
+        if (first < 0) return new short[0];
+        return Arrays.copyOfRange(samples, Math.max(0, first - padding), Math.min(samples.length, end + padding));
     }
 
     private File installModel() throws IOException {

@@ -43,8 +43,9 @@ Java_kr_co_sai_diary_DiarySpeech_transcribe(
     Cancellation cancellation{env, session, env->GetMethodID(type, "isCancelled", "()Z")};
     if (!cancellation.isCancelled || isCancelled(&cancellation)) return nullptr;
 
-    auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    auto params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
     params.language = "ko";
+    params.beam_search.beam_size = 5;
     params.n_threads = threads;
     params.no_context = true;
     params.print_progress = false;
