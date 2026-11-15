@@ -891,9 +891,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         val classifiedMood = if (detailTab == 0) dailyMood else selected?.emotion
 
         // One flower represents the whole day, independently of the selected time or tab.
-        art(characterArt(dailyMood), 60, 211, 122, 132, "하루 대표 꽃: ${dailyMood.flower}")
+        val dailyFlower = dayEntries.asReversed().firstNotNullOfOrNull { it.flower } ?: dailyMood
+        art(characterArt(dailyFlower), 60, 211, 122, 132, "하루 대표 꽃: ${dailyFlower.flower}")
         label("하루의 마음꽃", 60, 345, 122, 20, 12f, muted, center = true)
-        label(dailyMood.flower, 60, 365, 122, 23, 15f, bold = true, center = true)
+        label(dailyFlower.flower, 60, 365, 122, 23, 15f, bold = true, center = true)
         panel(185, 213, 1, 170, "#dcd2bd")
 
         label("감정", 194, 211, 99, 23, 13f, bold = true)
@@ -1171,14 +1172,14 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             monthTitle(68)
             return
         }
-        val flowers = entries.filter { it.flower != null }
+        val flowers = recordedFlowers(entries, today)
         val top = if (page == "recap") null else distribution(entries.map { it.emotion }).firstOrNull()
         monthTitle()
         if (page != "month_summary") myTabs(if (page == "recap") 1 else 0)
         when (page) {
             "recap" -> {
                 val earned = flowers.filterNot { it.isDemo }
-                val samples = db.demoFlowers(month)
+                val samples = flowers.filter { it.isDemo } + db.demoFlowers(month)
                 val recapFlowers = earned + samples
                 val moods = recapFlowers.mapNotNull { it.flower }
                 panel(38, 155, 465, 294)
@@ -1218,7 +1219,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             else -> {
                 val tiles = listOf("${entries.map { it.date }.distinct().size}편" to "작성한 일기",
                     "${db.streak()}일" to "연속 기록", "${completion()}%" to "오늘 목표 실행률",
-                    "${flowers.map { it.date }.distinct().size}송이" to "모은 꽃")
+                    "${flowers.size}송이" to "모은 꽃")
                 tiles.forEachIndexed { i, (value, caption) ->
                     val x = 38 + i * 240
                     panel(x, 148, 228, 60)
@@ -1248,7 +1249,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun garden() {
-        val entries = db.entries().filter { it.flower != null && !it.isDemo }
+        val entries = recordedFlowers(db.entries(), today)
         if (page == "flower") {
             button("‹ 돌아가기", 45, 82, 171, 42, paper) { go(flowerBack) }
             panel(45, 140, 339, 305, green)

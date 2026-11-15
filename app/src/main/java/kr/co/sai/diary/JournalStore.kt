@@ -45,6 +45,16 @@ internal fun representativeEmotion(records: List<Diary>): Mood = records.groupin
     .eachCount().entries.sortedWith(compareByDescending<Map.Entry<Mood, Int>> { it.value }
         .thenBy { it.key.ordinal }).firstOrNull()?.key ?: Mood.CALM
 
+internal fun recordedFlowers(records: List<Diary>, today: LocalDate): List<Diary> {
+    val savedFlowers = records.filter { it.flower != null }
+    val olderDiaries = records.filter { it.date < today && !it.isDemo }.groupBy { it.date }
+    val missingFlowers = olderDiaries.values.filter { day -> day.none { it.flower != null } }
+    // A finished day already has a representative mood, even if no bloom was saved.
+    return savedFlowers + missingFlowers.map { day ->
+        day.maxBy { it.time }.copy(flower = representativeEmotion(day))
+    }
+}
+
 internal fun normalizeDiaryTags(text: String): List<String> = text.split(Regex("[,，#\\s]+"))
     .map { it.trim().take(12) }.filter { it.isNotEmpty() }.distinct().take(6)
 
