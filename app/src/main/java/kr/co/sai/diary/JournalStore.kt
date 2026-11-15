@@ -57,17 +57,15 @@ internal fun suggestDiaryTags(text: String): List<String> = listOf(
 internal fun summarizeDay(records: List<Diary>): String {
     val sentenceBreak = Regex("(?<=[.!?。！？])\\s+|[\\r\\n]+")
     val whitespace = Regex("\\s+")
-    return records.sortedBy { it.time }.mapNotNull { entry ->
+    // Extract the event and feeling from each entry, then present one prose paragraph.
+    return records.sortedBy { it.time }.flatMap { entry ->
         val sentences = entry.body.trim().split(sentenceBreak)
             .map { it.trim().replace(whitespace, " ") }.filter { it.isNotEmpty() }
         val emotionSentence = sentences.indexOfFirst { Mood.scores(it).isNotEmpty() }
-        val excerpt = sentences.filterIndexed { index, _ ->
-            index == 0 || index == emotionSentence
-        }.distinct().joinToString(" ") { sentence ->
-            if (sentence.length > 140) sentence.take(139).trimEnd() + "…" else sentence
-        }
-        excerpt.takeIf { it.isNotEmpty() }?.let { "${entry.time.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))} · ${entry.emotion.title}\n$it" }
-    }.joinToString("\n\n")
+        sentences.filterIndexed { index, _ -> index == 0 || index == emotionSentence }
+    }.map { sentence ->
+        if (sentence.last() in ".!?。！？…") sentence else "$sentence."
+    }.distinct().joinToString(" ")
 }
 
 internal class JournalStore(context: Context) {

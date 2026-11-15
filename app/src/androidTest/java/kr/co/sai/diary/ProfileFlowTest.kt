@@ -192,7 +192,7 @@ class ProfileFlowTest {
             "도착", true, now.withHour(18).withMinute(40)))
         val morning = checkNotNull(db.add("아침에 발표했어요. 시작할 때는 긴장했어요. 커피도 샀어요.",
             "출발", true, now.withHour(8).withMinute(30)))
-        val summary = "08:30 · 걱정\n아침에 발표했어요. 시작할 때는 긴장했어요.\n\n18:40 · 기쁨\n저녁에 산책했어요. 노을을 보니 행복했어요."
+        val summary = "아침에 발표했어요. 시작할 때는 긴장했어요. 저녁에 산책했어요. 노을을 보니 행복했어요."
         assertEquals(summary, summarizeDay(listOf(evening, morning)))
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -345,14 +345,15 @@ class ProfileFlowTest {
         }
     }
 
-    @Test fun equalTextAtDifferentTimesRemainsInDailySummary() {
+    @Test fun dailySummaryOmitsMetadataAndRepeatedSentences() {
         val db = JournalStore(context)
         val now = LocalDateTime.now()
         val first = checkNotNull(db.add("오늘은 마음이 편안했어요.", "출발", false, now.withHour(8).withMinute(30)))
         val last = checkNotNull(db.add(first.body, "도착", false, now.withHour(18).withMinute(40)))
         val summary = summarizeDay(listOf(last, first))
-        assertTrue(summary.indexOf("08:30") < summary.indexOf("18:40"))
-        assertEquals(2, Regex("오늘은 마음이 편안했어요").findAll(summary).count())
+        assertFalse(Regex("\\d{2}:\\d{2}").containsMatchIn(summary))
+        assertFalse(summary.contains("\n"))
+        assertEquals("오늘은 마음이 편안했어요.", summary)
         assertEquals(Mood.JOY, Mood.classify("작업을 끝내서 뿌듯하고 고마웠어요."))
         assertEquals(Mood.WORRY, Mood.classify("내일 발표가 걱정되고 불안해요."))
         assertEquals(Mood.TIRED, Mood.classify("피곤하고 지쳤어요."))
