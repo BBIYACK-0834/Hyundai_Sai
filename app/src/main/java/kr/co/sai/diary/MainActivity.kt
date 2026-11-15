@@ -23,7 +23,7 @@ class MainActivity : Activity() {
     internal var profile = Profile()
     internal lateinit var journal: JournalScreens
     private var screen = "profile"
-    private var profileInputs: List<EditText> = emptyList()
+    private var nicknameInput: EditText? = null
     private val brown = "#4b372f"
     private val green = "#e9efdf"
     private val rose = "#9c625b"
@@ -54,10 +54,10 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(out)
         journal.saveState(out)
         out.putString("screen", screen)
-        out.putString("nickname", profileInputs.getOrNull(0)?.text?.toString() ?: profile.nickname)
+        out.putString("nickname", nicknameInput?.text?.toString() ?: profile.nickname)
         out.putString("moment", profile.moment)
-        out.putString("age", profileInputs.getOrNull(1)?.text?.toString() ?: profile.age)
-        out.putString("gender", profileInputs.getOrNull(2)?.text?.toString() ?: profile.gender)
+        out.putString("age", profile.age)
+        out.putString("gender", profile.gender)
         out.putString("goal", profile.goal)
     }
 
@@ -103,7 +103,7 @@ class MainActivity : Activity() {
     }
 
     internal fun render() {
-        profileInputs = emptyList()
+        nicknameInput = null
         surface = DesignSurface(this)
         surface.setBackgroundColor(Color.parseColor(if (screen == "weather") "#fcf6ed" else "#fff9f0"))
         setContentView(surface)
@@ -128,30 +128,19 @@ class MainActivity : Activity() {
 
         val nickname = profileInput("호칭", "불리고 싶은 이름을 입력해 주세요", profile.nickname,
             254.4, 203.2, 513.6, 40, InputType.TYPE_CLASS_TEXT)
-        // Earlier versions stored age ranges. Keep the stored value if this field is left empty.
-        val age = profileInput("나이", "예: 25", profile.age.takeIf { it.toIntOrNull() != null }.orEmpty(),
-            254.4, 292.8, 160.0, 3, InputType.TYPE_CLASS_NUMBER)
-        val gender = profileInput("성별 (선택)", "직접 입력해 주세요", profile.gender.takeUnless { it == "선택 안 함" }.orEmpty(),
-            433.6, 292.8, 334.4, 40, InputType.TYPE_CLASS_TEXT)
-        profileInputs = listOf(nickname, age, gender)
+        nicknameInput = nickname
+        profileChoice("나이", profile.age, 254.4, 160.0,
+            listOf("선택 안 함") + (1..130).map(Int::toString), ::ageLabel) { profile = profile.copy(age = it) }
+        profileChoice("성별", profile.gender, 433.6, 334.4,
+            listOf("선택 안 함", "여성", "남성", "기타")) { profile = profile.copy(gender = it) }
         button("다음", 254.4, 404.4, 513.6, 44.4, bg = rose, fg = "#ffffff") {
             val name = nickname.text.toString().trim()
-            val ageText = age.text.toString().trim()
             if (name.isEmpty()) {
                 nickname.error = "불리고 싶은 이름을 입력해 주세요."
                 nickname.requestFocus()
                 return@button
             }
-            if (ageText.isNotEmpty() && ageText.toIntOrNull()?.let { it in 1..130 } != true) {
-                age.error = "1세부터 130세까지 입력해 주세요."
-                age.requestFocus()
-                return@button
-            }
-            val updated = profile.copy(
-                nickname = name,
-                age = ageText.ifEmpty { profile.age.takeIf { it.endsWith("대") || it.endsWith("이상") } ?: "선택 안 함" },
-                gender = gender.text.toString().trim().ifEmpty { "선택 안 함" }
-            )
+            val updated = profile.copy(nickname = name)
             getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(nickname.windowToken, 0)
             AlertDialog.Builder(this).setTitle("이 기기에 저장할까요?")
                 .setMessage("입력한 정보를 이 기기에 저장해요. 정보 관리에서 삭제할 수 있어요.")
@@ -163,6 +152,33 @@ class MainActivity : Activity() {
                     } else Toast.makeText(this, "저장하지 못했어요. 다시 시도해 주세요.", Toast.LENGTH_LONG).show()
                 }.show()
         }
+    }
+
+    private fun ageLabel(age: String): String = if (age.toIntOrNull() != null) "${age}세" else age
+
+    private fun profileChoice(name: String, value: String, x: Double, width: Double,
+                              options: List<String>, display: (String) -> String = { it },
+                              select: (String) -> Unit) {
+        // Preserve earlier age ranges or custom gender values when editing an existing profile.
+        val choices = if (value.isNotBlank() && value !in options) options + value else options
+        var selected = value.ifBlank { "선택 안 함" }
+        lateinit var field: Button
+        fun updateField() {
+            field.text = "${display(selected)}  ▾"
+            field.contentDescription = "$name, ${display(selected)}"
+        }
+        field = button("", x, 292.8, width, 44.8, bg = "#fffdf8", fg = brown) {
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(surface.windowToken, 0)
+            AlertDialog.Builder(this).setTitle("$name 선택")
+                .setSingleChoiceItems(choices.map(display).toTypedArray(), choices.indexOf(selected)) { dialog, index ->
+                    selected = choices[index]
+                    select(selected)
+                    updateField()
+                    dialog.dismiss()
+                }.setNegativeButton("취소", null).show()
+        }
+        field.background = rounded("#fffdf8").apply { setStroke(1, Color.parseColor("#d9cbbe")) }
+        updateField()
     }
 
     private fun profileInput(name: String, hintText: String, value: String, x: Double, y: Double,

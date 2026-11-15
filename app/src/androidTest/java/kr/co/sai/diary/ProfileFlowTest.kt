@@ -60,32 +60,63 @@ class ProfileFlowTest {
     private fun input(activity: MainActivity, name: String): EditText =
         descendants(activity.window.decorView).filterIsInstance<EditText>().single { it.contentDescription == name }
 
-    @Test fun profileDraftSurvivesRecreation() {
+    private fun profileField(activity: MainActivity, name: String): Button =
+        descendants(activity.window.decorView).filterIsInstance<Button>()
+            .single { it.contentDescription?.startsWith("$name, ") == true }
+
+    private fun clickDialogOption(text: String) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        repeat(30) {
+            instrumentation.waitForIdleSync()
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val option = root?.findAccessibilityNodeInfosByText(text)
+                ?.firstOrNull { it.text?.toString() == text }
+            var node = option
+            while (node != null) {
+                if (node.isClickable && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return
+                node = node.parent
+            }
+            android.os.SystemClock.sleep(100)
+        }
+        fail("Could not select dialog option: $text")
+    }
+
+    @Test fun profileDraftSelectionsSurviveRecreationAndSave() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                input(activity, "호칭").setText("정원사 김")
-                input(activity, "나이").setText("25")
-                input(activity, "성별 (선택)").setText("직접 입력")
+                profileField(activity, "나이").performClick()
             }
+            clickDialogOption("2세")
+            scenario.onActivity { activity -> profileField(activity, "성별").performClick() }
+            clickDialogOption("여성")
+            scenario.onActivity { activity -> input(activity, "호칭").setText("정원사 김") }
             scenario.recreate()
             scenario.onActivity { activity ->
                 assertEquals("정원사 김", input(activity, "호칭").text.toString())
-                assertEquals("25", input(activity, "나이").text.toString())
-                assertEquals("직접 입력", input(activity, "성별 (선택)").text.toString())
+                assertEquals("나이, 2세", profileField(activity, "나이").contentDescription)
+                assertEquals("성별, 여성", profileField(activity, "성별").contentDescription)
+                click(activity, "다음")
             }
+            clickDialogOption("동의하고 저장")
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            assertEquals("2", ProfileStore(context).load().age)
+            assertEquals("여성", ProfileStore(context).load().gender)
         }
     }
 
-    @Test fun invalidAgeStaysOnProfileAndGenderCanBeBlank() {
+    @Test fun ageAndGenderCanBeLeftUnselected() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
+                assertEquals("나이, 선택 안 함", profileField(activity, "나이").contentDescription)
+                assertEquals("성별, 선택 안 함", profileField(activity, "성별").contentDescription)
                 input(activity, "호칭").setText("정원사")
-                input(activity, "나이").setText("131")
                 click(activity, "다음")
-                assertNotNull(input(activity, "나이").error)
-                assertTrue(input(activity, "성별 (선택)").text.isEmpty())
-                assertFalse(ProfileStore(context).hasProfile())
             }
+            clickDialogOption("동의하고 저장")
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            assertTrue(ProfileStore(context).hasProfile())
+            assertEquals("선택 안 함", ProfileStore(context).load().age)
+            assertEquals("선택 안 함", ProfileStore(context).load().gender)
         }
     }
 
@@ -100,7 +131,7 @@ class ProfileFlowTest {
         assertEquals(Profile(), reopened.load()); assertEquals("낮 맑음", reopened.weather())
     }
     @Test fun recapCombinesEarnedAndSampleFlowersWithoutAddingSamplesToGarden() {
-        ProfileStore(context).apply { save(Profile()); plant() }
+        ProfileStore(context).apply { save(Profile()); startDay() }
         val db = JournalStore(context)
         val now = LocalDateTime.now()
         val entry = checkNotNull(db.add("오늘은 너무 슬펐어요.", "도착", false, now))
@@ -121,7 +152,7 @@ class ProfileFlowTest {
     }
 
     @Test fun gardenShowsEarnedFlowersAcrossMonthsAndYears() {
-        ProfileStore(context).apply { save(Profile()); plant() }
+        ProfileStore(context).apply { save(Profile()); startDay() }
         val db = JournalStore(context)
         assertTrue(db.seedYesterday())
         val earlier = LocalDateTime.of(2025, 12, 1, 18, 0)
