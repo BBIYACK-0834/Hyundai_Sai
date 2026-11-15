@@ -99,6 +99,34 @@ class ProfileFlowTest {
         assertTrue(reopened.clear()); assertFalse(reopened.hasProfile()); assertFalse(reopened.plantedToday())
         assertEquals(Profile(), reopened.load()); assertEquals("낮 맑음", reopened.weather())
     }
+    @Test fun gardenShowsEarnedFlowersAcrossMonthsAndYears() {
+        ProfileStore(context).apply { save(Profile()); plant() }
+        val db = JournalStore(context)
+        assertTrue(db.seedYesterday())
+        val earlier = LocalDateTime.of(2025, 12, 1, 18, 0)
+        val later = LocalDateTime.of(2026, 1, 1, 18, 0)
+        for (date in listOf(earlier, later)) {
+            val entry = checkNotNull(db.add("오늘은 정말 기뻤어요.", "도착", false, date))
+            assertTrue(db.bloomToday(date.toLocalDate(), entry.id))
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                descendants(activity.window.decorView).filterIsInstance<Button>()
+                    .single { it.contentDescription == "마이페이지" }.performClick()
+                click(activity, "정원 도감")
+                val views = descendants(activity.window.decorView)
+                assertTrue(views.filterIsInstance<TextView>().any { it.text.toString() == "2송이" })
+                val blooms = views.filterIsInstance<android.widget.ImageView>()
+                    .filter { it.contentDescription?.startsWith("프리지아 · ") == true }
+                assertEquals(2, blooms.size)
+                assertFalse(views.filterIsInstance<Button>().any { it.text.matches(Regex("[0-9]+월")) })
+                blooms.first().performClick()
+                assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>()
+                    .any { it.text.toString().contains("전체 피어난 횟수 · 2회") })
+            }
+        }
+    }
+
     @Test fun demoStartsInDayAndBloomsUsingSavedEmotion() {
         ProfileStore(context).save(Profile())
         val db = JournalStore(context)

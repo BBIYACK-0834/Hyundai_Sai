@@ -16,6 +16,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.Toast
@@ -27,6 +28,7 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
+import kotlin.random.Random
 
 internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     private val db = JournalStore(host)
@@ -205,20 +207,23 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             host.surface.place(violet, x, y, w, h)
             return
         }
-        val filename = files[name] ?: return
+        imageView(name, description)?.let { host.surface.place(it, x, y, w, h) }
+    }
+
+    private fun imageView(name: String, description: String?): ImageView? {
+        val filename = files[name] ?: return null
         val drawable = pictures[name]?.newDrawable() ?: host.assets.open(filename).use {
             if (filename.endsWith(".svg")) PictureDrawable(SVG.getFromInputStream(it).renderToPicture())
             else Drawable.createFromStream(it, filename)
-        } ?: return
+        } ?: return null
         drawable.constantState?.let { pictures[name] = it }
-        val view = ImageView(host).apply {
+        return ImageView(host).apply {
             setImageDrawable(drawable)
             if (filename.endsWith(".svg")) setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = description
             if (description == null) importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        host.surface.place(view, x, y, w, h)
     }
 
     private fun panel(x: Number, y: Number, w: Number, h: Number, bg: String = paper) =
@@ -1176,7 +1181,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                     label("이달에 ${flowers.map { it.date }.distinct().size}일 동안 꽃을 피웠어요.",
                         59, 371, 424, 31, 14f, center = true)
                 }
-                button("월별 꽃 전체 보기", 60, 407, 423, 36) { go("bed") }
+                button("내 정원 보기", 60, 407, 423, 36) { go("garden") }
                 label("감정 비율 · 시연 데이터", 540, 171, 418, 39, 23f, bold = true)
                 bars(entries, 541, 217, 417, 33)
             }
@@ -1226,8 +1231,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
     }
 
     private fun garden() {
-        val entries = db.entries().filter { it.date.year == month.year && it.flower != null }
-        val monthly = db.demoFlowers(month)
+        val entries = db.entries().filter { it.flower != null && !it.isDemo }
         if (page == "flower") {
             button("‹ 돌아가기", 45, 82, 171, 42, paper) { go(flowerBack) }
             panel(45, 140, 339, 305, green)
@@ -1235,7 +1239,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             label(flower.flower, 45, 350, 339, 55, 27f, bold = true, center = true)
             panel(406, 140, 572, 305)
             label("꽃말 · ${flower.meaning}", 425, 168, 535, 55, 23f, rose, true)
-            label("감정 · ${flower.title}     올해 피어난 횟수 · ${entries.count { it.flower == flower }}회",
+            label("감정 · ${flower.title}     전체 피어난 횟수 · ${entries.count { it.flower == flower }}회",
                 425, 225, 535, 46, 17f)
             label(flower.message, 425, 276, 535, 65, 19f)
             button("관련 일기 보기", 425, 365, 535, 47) {
@@ -1244,54 +1248,20 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             }
             return
         }
-        if (page == "garden") {
-            monthTitle()
-            myTabs(2)
-            button("월별 꽃 보기", 60, 69, 190, 31) { go("bed") }
+        if (page == "garden" || page == "bed") {
+            label("나의 정원", 66, 69, 420, 34, 25f, bold = true)
+            label("${entries.size}송이", 550, 69, 190, 31, 16f, muted, center = true)
             button("꽃도감 ›", 771, 69, 190, 31) { go("flowers") }
+            myTabs(2)
             gardenBackground()
-            for (value in 1..12) {
-                val x = 72 + ((value - 1) % 6) * 151
-                val y = 188 + ((value - 1) / 6) * 105
-                val blooms = db.demoFlowers(month.withMonth(value)).mapNotNull { it.flower }.distinct()
-                blooms.take(3).forEachIndexed { i, bloom ->
-                    art("flower${bloom.art}", x + 16 + i * 36, y - 17, 40, 47)
-                }
-                button("${value}월", x, y + 31, 134, 37, if (blooms.isEmpty()) paper else green) {
-                    month = YearMonth.of(month.year, value)
-                    half = (value - 1) / 6
-                    go("bed")
-                }
+            if (entries.isEmpty()) {
+                label("일기를 쓰고 마음꽃을 피우면 여기에 자라요.", 142, 228, 740, 133, 21f, center = true)
+            } else {
+                gardenFlowers(entries.sortedWith(compareBy<Diary> { it.date }.thenBy { it.time }.thenBy { it.id }))
             }
             return
         }
         button("‹ 정원으로", 45, 81, 171, 38, paper) { go("garden") }
-        if (page == "bed") {
-            label("${month.monthValue}월 · 시연 화단", 365, 76, 294, 45, 22f, bold = true, center = true)
-            for (value in 1..12) {
-                button("${value}월", 39 + (value - 1) * 79, 129, 73, 34,
-                    if (value == month.monthValue) "#536548" else green,
-                    if (value == month.monthValue) paper else brown) {
-                    month = month.withMonth(value)
-                    half = (value - 1) / 6
-                    host.render()
-                }
-            }
-            gardenBackground(178)
-            val blooms = monthly.mapNotNull { it.flower }.distinct()
-            if (blooms.isEmpty()) {
-                label("이달에 피어난 꽃이 없어요.", 142, 241, 740, 133, 21f, center = true)
-            }
-            blooms.forEachIndexed { i, bloom ->
-                val x = 84 + (i % 3) * 301
-                val y = if (blooms.size <= 3) 208 else 185 + (i / 3) * 126
-                val size = if (blooms.size <= 3) 120 else 83
-                art("flower${bloom.art}", x + (250 - size) / 2, y, size, size)
-                button("${bloom.flower} · ${monthly.count { it.flower == bloom }}송이",
-                    x, y + size, 250, 32, paper) { openFlower(bloom, "bed") }
-            }
-            return
-        }
         label("꽃도감", 405, 76, 214, 45, 25f, bold = true, center = true)
         Mood.entries.forEachIndexed { i, value ->
             val x = 47 + i % 3 * 313
@@ -1302,6 +1272,42 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             label("꽃말 · ${value.meaning}", x + 113, y + 65, 170, 33, 15f, muted)
             hit(value.flower, x, y, 300, 131) { openFlower(value, "flowers") }
         }
+    }
+
+    private fun gardenFlowers(entries: List<Diary>) {
+        val columns = 9
+        val rows = 3
+        val slotsPerPatch = columns * rows
+        val slots = (0 until slotsPerPatch).shuffled(Random(231))
+        val flowerViews = entries.mapIndexedNotNull { index, entry ->
+            val bloom = entry.flower ?: return@mapIndexedNotNull null
+            val slot = slots[index % slotsPerPatch]
+            val jitter = Random(entry.id.hashCode())
+            val x = slot % columns * 89 + jitter.nextInt(0, 17)
+            val y = (index / slotsPerPatch * rows + slot / columns) * 76 + jitter.nextInt(0, 9)
+            imageView("flower${bloom.art}", "${bloom.flower} · ${entry.date.format(shortDate)}")?.apply {
+                setOnClickListener { openFlower(bloom, "garden") }
+                isFocusable = true
+            }?.let { Triple(it, x, y) }
+        }
+        val field = object : FrameLayout(host) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val scale = MeasureSpec.getSize(widthMeasureSpec) / 810f
+                flowerViews.forEach { (view, x, y) ->
+                    val params = view.layoutParams as LayoutParams
+                    params.width = (70 * scale).toInt()
+                    params.height = (66 * scale).toInt()
+                    params.leftMargin = (x * scale).toInt()
+                    params.topMargin = (y * scale).toInt()
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }
+        flowerViews.forEach { (view, _, _) -> field.addView(view, FrameLayout.LayoutParams(0, 0)) }
+        val scroll = ScrollView(host).apply {
+            addView(field, ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT))
+        }
+        host.surface.place(scroll, 107, 178, 810, 239)
     }
 
     private fun gardenBackground(top: Int = 158) {
