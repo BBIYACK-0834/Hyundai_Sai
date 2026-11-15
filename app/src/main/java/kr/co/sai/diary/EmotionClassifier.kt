@@ -16,7 +16,7 @@ internal object EmotionClassifier {
     private val suffixNegation = Regex("^[가-힣]{0,4}\\s*(?:지\\s*(?:않|않았|못)|진\\s*않|하지\\s*않|하지는\\s*않|하지도\\s*않|하지\\s*못|않|아니|없)")
     private val intensifier = Regex("(?:너무|정말|진짜|매우|아주|엄청|무척|많이)\\s*$")
 
-    fun scores(text: String): Map<Mood, Int> {
+    fun scores(text: String, favorRecent: Boolean = true): Map<Mood, Int> {
         val result = linkedMapOf<Mood, Int>()
         val parts = text.trim().split(clauses).filter { it.isNotBlank() }
         parts.forEachIndexed { index, raw ->
@@ -28,7 +28,7 @@ internal object EmotionClassifier {
                     // Do not infer the opposite emotion from a denied feeling.
                     if (!prefixNegation.containsMatchIn(before) && !suffixNegation.containsMatchIn(after)) {
                         val weight = 2 + (if (intensifier.containsMatchIn(before)) 2 else 0) +
-                            (if (index == parts.lastIndex) 1 else 0)
+                            (if (favorRecent && index == parts.lastIndex) 1 else 0)
                         result[mood] = (result[mood] ?: 0) + weight
                     }
                 }

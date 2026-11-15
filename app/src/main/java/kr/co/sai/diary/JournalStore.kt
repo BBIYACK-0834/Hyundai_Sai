@@ -38,12 +38,35 @@ internal data class Diary(
     val isDemo get() = id.startsWith("demo-") && moment.startsWith("시연 예시")
     val summary get() = body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(70)
     val mood get() = flower ?: emotion
+    val emotionWeights: Map<Mood, Int> by lazy { EmotionClassifier.scores(body, favorRecent = false) }
 }
 
 
 internal fun representativeEmotion(records: List<Diary>): Mood = records.groupingBy { it.emotion }
     .eachCount().entries.sortedWith(compareByDescending<Map.Entry<Mood, Int>> { it.value }
         .thenBy { it.key.ordinal }).firstOrNull()?.key ?: Mood.CALM
+
+internal fun emotionDistribution(records: List<Diary>): List<Pair<Mood, Int>> {
+    val weights = mutableMapOf<Mood, Int>()
+    for (record in records) {
+        for ((mood, weight) in record.emotionWeights) {
+            weights[mood] = weights.getOrDefault(mood, 0) + weight
+        }
+    }
+    return moodPercentages(weights)
+}
+
+internal fun moodPercentages(weights: Map<Mood, Int>): List<Pair<Mood, Int>> {
+    val total = weights.values.sumOf { it.toLong() }
+    if (total == 0L) return emptyList()
+    val sorted = weights.entries.sortedWith(compareByDescending<Map.Entry<Mood, Int>> { it.value }
+        .thenBy { it.key.ordinal })
+    val remainder = 100 - sorted.sumOf { (it.value * 100L / total).toInt() }
+    val roundedUp = sorted.sortedByDescending { it.value * 100L % total }.take(remainder).map { it.key }.toSet()
+    return sorted.map { (mood, weight) ->
+        mood to ((weight * 100L / total).toInt() + if (mood in roundedUp) 1 else 0)
+    }
+}
 
 internal fun recordedFlowers(records: List<Diary>, today: LocalDate): List<Diary> {
     val savedFlowers = records.filter { it.flower != null }

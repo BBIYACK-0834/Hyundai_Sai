@@ -616,7 +616,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         val entry = db.add(draft.text, draft.moment, voice = true, recordedAt = draft.recordedAt, id = draft.id, tags = emptyList())
         voiceDraft = if (entry == null) draft else null
         latestSavedId = entry?.id ?: latestSavedId
-        message = if (entry == null) "홈에서 다시 저장해 주세요." else "오늘의 감정은 ${entry.emotion.title}이에요."
+        message = if (entry == null) "홈에서 다시 저장해 주세요." else "일기를 저장했어요."
         if (!host.isJournalVisible || page != "home") msg(message)
         host.render()
     }
@@ -628,7 +628,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             return
         }
         latestSavedId = entry.id
-        message = "오늘의 감정은 ${entry.emotion.title}이에요."
+        message = "일기를 저장했어요."
         host.render()
     }
 
@@ -830,7 +830,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             panel(x, y, 289, 99, if (entry == null) "#f1ebe2" else green)
             label("${day}일", x + 14, y + 10, 190, 34, 22f, bold = true)
             label(entry?.summary ?: "기록 없음", x + 14, y + 48, 210, 26, 15f, lines = 1)
-            label(entries.map { it.emotion.title }.distinct().joinToString(" · "), x + 14, y + 72, 210, 20, 13f, muted)
+            label(emotionDistribution(entries).joinToString(" · ") { it.first.title }, x + 14, y + 72, 210, 20, 13f, muted)
             if (entry == null) {
                 val sprout = ImageView(host).apply {
                     setImageDrawable(host.assets.open("sprout.svg").use { PictureDrawable(SVG.getFromInputStream(it).renderToPicture()) })
@@ -888,7 +888,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         panel(316, 137, 664, 279)
         label(entry.date.format(shortDate), 62, 154, 227, 40, 22f, bold = true, center = true)
         val dailyMood = representativeEmotion(dayEntries)
-        val classifiedMood = if (detailTab == 0) dailyMood else selected?.emotion
+        val emotions = emotionDistribution(if (detailTab == 0) dayEntries else listOfNotNull(selected))
 
         // One flower represents the whole day, independently of the selected time or tab.
         val dailyFlower = dayEntries.asReversed().firstNotNullOfOrNull { it.flower } ?: dailyMood
@@ -897,10 +897,10 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         label(dailyFlower.flower, 60, 365, 122, 23, 15f, bold = true, center = true)
         panel(185, 213, 1, 170, "#dcd2bd")
 
-        label("감정", 194, 211, 99, 23, 13f, bold = true)
+        label("주요 감정", 194, 211, 99, 23, 13f, bold = true)
         label(if (detailTab == 0) "하루 전체" else selected?.time?.format(clockFormat) ?: "기록 없음",
             194, 237, 99, 20, 12f, muted)
-        label(classifiedMood?.title ?: "—", 194, 260, 99, 31, 21f, bold = true)
+        label(emotions.firstOrNull()?.first?.title ?: "—", 194, 260, 99, 31, 21f, bold = true)
         label(if (detailTab == 0) "${dailyMood.title} · ${dayEntries.size}개의 기록"
             else "하루 대표 감정 · ${dailyMood.title}", 61, 394, 228, 19, 12f, muted, center = true)
 
@@ -927,12 +927,12 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             setLineSpacing(5f, 1f)
         }
         val tagTop = if (hasTimePicker) 241 else 153
-        val tags = if (detailTab == 0) dayEntries.map { it.emotion.title }.distinct()
-            else selected?.let { listOf(it.emotion.title) }.orEmpty()
-        if (tags.isNotEmpty()) {
+        if (emotions.isNotEmpty()) {
             val tagText = android.widget.TextView(host).apply {
-                text = "감정  " + tags.joinToString(" · ")
-                contentDescription = "감정 태그: ${tags.joinToString(", ")}"
+                text = "감정  " + emotions.joinToString(" · ") { (mood, percent) ->
+                    "${mood.title} $percent%"
+                }
+                contentDescription = "감정 태그: ${emotions.joinToString(", ") { it.first.title }}"
                 setTextColor(Color.parseColor("#536548"))
                 textSize = 14f
                 setSingleLine(true)
@@ -940,7 +940,7 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             host.surface.place(android.widget.HorizontalScrollView(host).apply { addView(tagText) },
                 339, tagTop, 617, 28)
         }
-        val bodyTop = if (tags.isEmpty()) tagTop else tagTop + 34
+        val bodyTop = if (emotions.isEmpty()) tagTop else tagTop + 34
         val editing = selected?.takeIf { detailTab != 0 }
         val bodyBottom = if (editing == null) 398 else 360
         host.surface.place(ScrollView(host).apply { addView(body) }, 339, bodyTop, 617, bodyBottom - bodyTop)
@@ -974,8 +974,15 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             val active = item.id == selected?.id
             val chip = Button(host).apply {
                 val timeText = item.time.format(clockFormat)
-                text = "$timeText · ${item.emotion.title}"
-                contentDescription = "$timeText · ${item.emotion.title} 기록"
+                val moods = item.emotionWeights.keys
+                val summary = when (moods.size) {
+                    0 -> "감정 미분류"
+                    1 -> moods.first().title
+                    else -> "복합 감정"
+                }
+                text = "$timeText · $summary"
+                contentDescription = if (moods.size < 2) "$timeText · $summary 기록"
+                    else "$timeText · ${moods.joinToString(", ") { it.title }} 기록"
                 isSelected = active
                 isAllCaps = false
                 minWidth = 0
@@ -1087,21 +1094,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
         listOf("출발할 때 한 문장 남기기", "고마웠던 순간 떠올리기", "도착하면 일기 남기기")
     )
 
-    private fun distribution(moods: List<Mood>): List<Pair<Mood, Int>> {
-        val totals = moods.groupingBy { it }.eachCount().toList()
-            .sortedWith(compareByDescending<Pair<Mood, Int>> { it.second }.thenBy { it.first.ordinal })
-        val sum = totals.sumOf { it.second }
-        if (sum == 0) return emptyList()
-        var cumulative = 0
-        return totals.map { (mood, total) ->
-            val before = cumulative * 100 / sum
-            cumulative += total
-            mood to (cumulative * 100 / sum - before)
-        }
-    }
-
     private fun bars(entries: List<Diary>, x: Int, y: Int, w: Int, step: Int, limit: Int = 6) {
-        drawBars(distribution(entries.map { it.emotion }), x, y, w, step, limit)
+        drawBars(emotionDistribution(entries), x, y, w, step, limit)
     }
 
     private fun drawBars(scores: List<Pair<Mood, Int>>, x: Int, y: Int, w: Int, step: Int, limit: Int = 6) {
@@ -1173,7 +1167,8 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
             return
         }
         val flowers = recordedFlowers(entries, today)
-        val top = if (page == "recap") null else distribution(entries.map { it.emotion }).firstOrNull()
+        val monthEmotions = emotionDistribution(entries)
+        val top = monthEmotions.firstOrNull()
         monthTitle()
         if (page != "month_summary") myTabs(if (page == "recap") 1 else 0)
         when (page) {
@@ -1200,8 +1195,12 @@ internal class JournalScreens(private val host: MainActivity, state: Bundle?) {
                         59, 371, 424, 31, 14f, center = true)
                 }
                 button("내 정원 보기", 60, 407, 423, 36) { go("garden") }
-                label("꽃으로 본 감정 비율", 540, 171, 418, 39, 23f, bold = true)
-                drawBars(distribution(moods), 541, 217, 417, 33)
+                val recapEmotions = monthEmotions.ifEmpty {
+                    moodPercentages(samples.mapNotNull { it.flower }.groupingBy { it }.eachCount())
+                }
+                label(if (monthEmotions.isEmpty()) "감정 비율 · 시연용 꽃" else "일기에 기록된 감정 비율",
+                    540, 171, 418, 39, 23f, bold = true)
+                drawBars(recapEmotions, 541, 217, 417, 33)
             }
             "month_summary" -> {
                 button("‹ 마이페이지", 38, 82, 194, 34) { go("summary") }

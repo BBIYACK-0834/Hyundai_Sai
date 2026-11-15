@@ -145,6 +145,8 @@ class ProfileFlowTest {
                     .any { it.text.toString() == text }
                 assertTrue(shows("내 꽃 1송이 · 시연 18송이"))
                 assertTrue(shows("3송이")) // Two sample flowers and one earned flower for sadness.
+                assertTrue(shows("일기에 기록된 감정 비율"))
+                assertTrue(shows("100%"))
                 click(activity, "내 정원 보기")
                 assertTrue(shows("1송이"))
             }
@@ -286,11 +288,11 @@ class ProfileFlowTest {
         ProfileStore(context).apply { save(Profile()); plant(); setWeather("낮 맑음") }
         val db = JournalStore(context)
         val now = LocalDateTime.now()
-        val evening = checkNotNull(db.add("저녁에 산책했어요. 노을을 보니 행복했어요. 집 앞에서 신발을 털었어요.",
+        val evening = checkNotNull(db.add("저녁에 산책했어요. 노을을 보니 정말 행복했어요. 친구와 헤어져 슬펐어요.",
             "도착", true, now.withHour(18).withMinute(40)))
         val morning = checkNotNull(db.add("아침에 발표했어요. 시작할 때는 긴장했어요. 커피도 샀어요.",
             "출발", true, now.withHour(8).withMinute(30)))
-        val summary = "아침에 발표했어요. 시작할 때는 긴장했어요. 저녁에 산책했어요. 노을을 보니 행복했어요."
+        val summary = "아침에 발표했어요. 시작할 때는 긴장했어요. 저녁에 산책했어요. 노을을 보니 정말 행복했어요."
         assertEquals(summary, summarizeDay(listOf(evening, morning)))
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -305,10 +307,12 @@ class ProfileFlowTest {
                 assertTrue(shows("시간대 선택"))
                 click(activity, "08:30 · 걱정")
                 assertTrue(shows(morning.body))
-                click(activity, "18:40 · 기쁨")
+                click(activity, "18:40 · 복합 감정")
                 assertTrue(shows(evening.body))
+                assertTrue(shows("감정  기쁨 67% · 슬픔 33%"))
                 click(activity, "요약 일기")
                 assertTrue(shows(summary))
+                assertTrue(shows("감정  기쁨 50% · 걱정 25% · 슬픔 25%"))
             }
         }
     }
@@ -393,12 +397,12 @@ class ProfileFlowTest {
                 click(a, "음성 기록")
                 assertFalse(descendants(a.window.decorView).filterIsInstance<Button>()
                     .any { it.text.toString().startsWith("12:40") })
-                click(a, "18:40 · 평온")
+                click(a, "18:40 · 복합 감정")
                 assertTrue(shows("실제 녹음 없음"))
                 assertTrue(hasDailyFlower())
                 assertTrue(shows("퇴근길에 노을"))
                 assertTrue(descendants(a.window.decorView).filterIsInstance<TextView>()
-                    .any { it.contentDescription == "감정 태그: 평온" })
+                    .any { it.contentDescription == "감정 태그: 평온, 기쁨" })
             }
         }
     }
@@ -414,7 +418,7 @@ class ProfileFlowTest {
             capture("04-demo-summary")
             scenario.onActivity { click(it, "시간별 기록"); click(it, "12:40 · 평온") }
             capture("05-demo-times")
-            scenario.onActivity { click(it, "음성 기록"); click(it, "18:40 · 평온") }
+            scenario.onActivity { click(it, "음성 기록"); click(it, "18:40 · 복합 감정") }
             capture("06-demo-voice")
         }
     }
